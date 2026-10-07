@@ -2383,20 +2383,60 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
       }));
     }
 
+    if (resolverTasks.length === 0) {
+      const now = Date.now();
+      const coolingDownProviders = [
+        ...(ytdlResolverCooldownUntil > now
+          ? [{ provider: 'ytdl-core', retryAfterSeconds: Math.ceil((ytdlResolverCooldownUntil - now) / 1000) }]
+          : []),
+        ...instances.flatMap((instance) => {
+          const cooldownUntil = ytResolverProviderCooldowns.get(instance) || 0;
+          return cooldownUntil > now
+            ? [{ provider: instance, retryAfterSeconds: Math.ceil((cooldownUntil - now) / 1000) }]
+            : [];
+        }),
+      ];
+      const retryAfterSeconds = coolingDownProviders.length > 0
+        ? Math.max(1, Math.min(...coolingDownProviders.map((provider) => provider.retryAfterSeconds)))
+        : Math.ceil(YT_RESOLVER_NETWORK_COOLDOWN_MS / 1000);
+      console.warn('All YouTube audio resolvers are cooling down', {
+        videoId,
+        providers: coolingDownProviders,
+        retryAfterSeconds,
+      });
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(503).json({
+        success: false,
+        message: 'YouTube audio providers are temporarily unavailable',
+        retryAfterSeconds,
+      });
+    }
+
     try {
-      if (resolverTasks.length === 0) throw new Error('All YouTube providers are cooling down');
       const audioUrl = await Promise.any(resolverTasks);
       responseCache.set(cacheKey, { data: audioUrl, timestamp: Date.now() });
       return res.redirect(audioUrl);
     } catch (error) {
-      console.error('All YouTube audio resolvers failed', {
-        videoId,
-        failures: error instanceof AggregateError ? error.errors.length : 'unknown',
-      });
+      const failures = error && typeof error === 'object' && 'errors' in error && Array.isArray(error.errors)
+        ? error.errors.length
+        : resolverTasks.length;
+      console.error('All YouTube audio resolvers failed', { videoId, failures });
     }
 
-    res.setHeader('Retry-After', String(Math.ceil(YT_RESOLVER_NETWORK_COOLDOWN_MS / 1000)));
-    return res.status(503).json({ success: false, message: 'YouTube audio providers are temporarily unavailable' });
+    const now = Date.now();
+    const cooldowns = [
+      ytdlResolverCooldownUntil,
+      ...instances.map((instance) => ytResolverProviderCooldowns.get(instance) || 0),
+    ].filter((cooldownUntil) => cooldownUntil > now);
+    const retryAfterSeconds = cooldowns.length > 0
+      ? Math.max(1, Math.min(...cooldowns.map((cooldownUntil) => Math.ceil((cooldownUntil - now) / 1000))))
+      : Math.ceil(YT_RESOLVER_NETWORK_COOLDOWN_MS / 1000);
+    res.setHeader('Retry-After', String(retryAfterSeconds));
+    return res.status(503).json({
+      success: false,
+      message: 'YouTube audio providers are temporarily unavailable',
+      retryAfterSeconds,
+    });
   } catch (error: unknown) {
     console.error('YouTube audio stream resolution failed:', error);
     return res.status(502).json({ success: false, message: 'Audio stream resolution failed' });
