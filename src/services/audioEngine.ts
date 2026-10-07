@@ -57,8 +57,9 @@ class AudioEngine {
       window.addEventListener('rezbeatsai_quality_change', (event) => {
         const quality = (event as CustomEvent<AudioQuality>).detail;
         if (!this.currentTrack || !this.userWantsPlay || !this.isUsingHtmlAudio) return;
-        this.resumeAt = this.getCurrentTime();
-        this.playTrack(this.currentTrack, quality);
+        const track = this.currentTrack;
+        const resumeAt = this.getCurrentTime();
+        this.playTrack(track, quality, resumeAt);
       });
     }
   }
@@ -154,8 +155,13 @@ class AudioEngine {
 
     this.audioEl.addEventListener('loadedmetadata', () => {
       if (!this.audioEl || !this.isUsingHtmlAudio) return;
-      if (this.resumeAt > 0 && Number.isFinite(this.audioEl.duration)) {
-        this.audioEl.currentTime = Math.min(this.resumeAt, this.audioEl.duration);
+      if (this.resumeAt > 0) {
+        const duration = Number.isFinite(this.audioEl.duration) && this.audioEl.duration > 0
+          ? this.audioEl.duration
+          : this.currentTrack?.durationSec;
+        this.audioEl.currentTime = duration && duration > 0
+          ? Math.min(this.resumeAt, duration)
+          : this.resumeAt;
         this.resumeAt = 0;
       }
       const dur =
@@ -309,7 +315,8 @@ class AudioEngine {
   }
 
   /** Play a track through the native audio element, resolving a full stream when needed. */
-  public playTrack(track: Track, quality: AudioQuality = getAudioQuality()) {
+  public playTrack(track: Track, quality: AudioQuality = getAudioQuality(), resumeAt = 0) {
+    this.resumeAt = Math.max(0, resumeAt);
     this.userWantsPlay = true;
     const token = ++this.playToken;
     this.currentTrack = track;
