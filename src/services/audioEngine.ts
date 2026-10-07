@@ -42,6 +42,7 @@ class AudioEngine {
   private playbackErrorListeners: PlaybackErrorCallback[] = [];
   private streamAttemptId = 0;
   private failedStreamAttemptId = 0;
+  private startupWatchdog: number | null = null;
 
   // Synth mode time simulation
   private synthCurrentTime: number = 0;
@@ -199,6 +200,7 @@ class AudioEngine {
     this.audioEl.addEventListener('timeupdate', () => {
       if (!this.audioEl || !this.isUsingHtmlAudio) return;
       const cur = this.audioEl.currentTime || 0;
+      if (cur > 0) this.clearStartupWatchdog();
       const dur =
         this.audioEl.duration && !isNaN(this.audioEl.duration)
           ? this.audioEl.duration
@@ -419,6 +421,7 @@ class AudioEngine {
   }
 
   private pauseAllSources() {
+    this.clearStartupWatchdog();
     this.isUsingHtmlAudio = false;
     if (this.audioEl) {
       this.audioEl.pause();
@@ -443,12 +446,41 @@ class AudioEngine {
     this.playDirectStream(resolverUrl.toString(), this.playToken);
   }
 
+  private clearStartupWatchdog() {
+    if (this.startupWatchdog !== null) {
+      window.clearTimeout(this.startupWatchdog);
+      this.startupWatchdog = null;
+    }
+  }
+
+  private watchForPlaybackStart(token: number, attemptId: number) {
+    this.clearStartupWatchdog();
+    if (!this.audioEl || this.audioEl.currentTime > 0) return;
+
+    this.startupWatchdog = window.setTimeout(() => {
+      this.startupWatchdog = null;
+      if (
+        token !== this.playToken ||
+        attemptId !== this.streamAttemptId ||
+        !this.userWantsPlay ||
+        !this.isUsingHtmlAudio ||
+        !this.audioEl ||
+        this.audioEl.currentTime > 0
+      ) {
+        return;
+      }
+
+      void this.handleStreamFailure(token, attemptId, 'Audio stream made no playback progress');
+    }, 15000);
+  }
+
   private playDirectStream(streamUrl: string, token = this.playToken) {
     this.isUsingHtmlAudio = true;
     this.initAudioElement();
 
     if (this.audioEl) {
       this.audioEl.loop = false;
+      this.clearStartupWatchdog();
       this.streamAttemptId += 1;
       const attemptId = this.streamAttemptId;
       this.audioEl.src = streamUrl.startsWith('/api/')
@@ -456,6 +488,7 @@ class AudioEngine {
         : streamUrl;
       this.audioEl.currentTime = 0;
       this.audioEl.volume = this.volume;
+      this.watchForPlaybackStart(token, attemptId);
       this.audioEl
         .play()
         .then(() => {
@@ -487,6 +520,7 @@ class AudioEngine {
     }
 
     this.failedStreamAttemptId = attemptId;
+    this.clearStartupWatchdog();
     console.warn('Audio stream failed; trying another source:', error);
 
     if (this.ytCandidateIdx + 1 < this.ytCandidates.length) {
@@ -616,6 +650,7 @@ class AudioEngine {
     if (this.isPlaying) return;
 
     if (this.isUsingHtmlAudio && this.audioEl && this.audioEl.src) {
+      this.watchForPlaybackStart(this.playToken, this.streamAttemptId);
       this.audioEl
         .play()
         .then(() => {
@@ -639,6 +674,7 @@ class AudioEngine {
   public pause() {
     this.userWantsPlay = false;
     this.playToken += 1;
+    this.clearStartupWatchdog();
     this.notifyPlaybackState(false);
 
     if (this.audioEl) {
