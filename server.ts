@@ -1546,22 +1546,35 @@ app.get('/api/music/full-song-match', async (req, res) => {
       return res.status(502).json({ success: false, message: 'Full-song audio is unavailable' });
     }
 
+    const artistStopWords = new Set([
+      'and', 'audio', 'channel', 'entertainment', 'from', 'india', 'label', 'lyrics',
+      'lyrical', 'music', 'official', 'records', 'song', 'songs', 'topic', 'video',
+    ]);
+    const artistHints = [
+      artist,
+      ...title.split('|').slice(1),
+    ]
+      .flatMap((value) => normForMatch(value).split(' '))
+      .filter((token) => token.length > 2 && !artistStopWords.has(token));
     const wantedTitle = normForMatch(cleanTitleForMatch(searchTitle) || searchTitle);
     const wantedTokens = wantedTitle.split(' ').filter((token) => token.length > 1);
-    const artistTokens = normForMatch(artist).split(' ').filter((token) => token.length > 2);
 
     const ranked = candidates
       .filter((track) => track.isFullSong && track.audioUrl)
       .map((track) => {
-        const candidateTitle = normForMatch(cleanTitleForMatch(track.title) || track.title);
+        const candidateTitle = normForMatch(track.title);
+        const cleanedCandidateTitle = normForMatch(cleanTitleForMatch(track.title) || track.title);
         const candidateTokens = candidateTitle.split(' ').filter((token) => token.length > 1);
-        const hitRatio = wantedTokens.length
-          ? wantedTokens.filter((token) => candidateTokens.includes(token)).length / wantedTokens.length
-          : 0;
-        if (hitRatio < 0.65) return { track, score: -1 };
+        const cleanedCandidateTokens = cleanedCandidateTitle.split(' ').filter((token) => token.length > 1);
+        const titleHits = wantedTokens.filter((token) => cleanedCandidateTokens.includes(token)).length;
+        const titleCoverage = wantedTokens.length ? titleHits / wantedTokens.length : 0;
+        const titlePrecision = cleanedCandidateTokens.length ? titleHits / cleanedCandidateTokens.length : 0;
+        if (titleCoverage < 0.9 || titlePrecision < 0.8) return { track, score: -1 };
 
         const candidateArtist = normForMatch(track.artist);
-        const artistMatch = artistTokens.some((token) => candidateArtist.includes(token));
+        const candidateArtistTokens = candidateArtist.split(' ').filter((token) => token.length > 2);
+        const artistMatches = artistHints.filter((token) => candidateArtistTokens.includes(token));
+        if (artistHints.length > 0 && artistMatches.length === 0) return { track, score: -1 };
         const durationDifference = durationSec && track.durationSec
           ? Math.abs(track.durationSec - durationSec)
           : 0;
@@ -1569,10 +1582,10 @@ app.get('/api/music/full-song-match', async (req, res) => {
 
         return {
           track,
-          score: hitRatio * 60 + (artistMatch ? 25 : 0) + (durationDifference <= 10 ? 10 : 0),
+          score: titleCoverage * 60 + titlePrecision * 20 + (artistMatches.length ? 30 : 0) + (durationDifference <= 10 ? 10 : 0),
         };
       })
-      .filter((item) => item.score >= 39)
+      .filter((item) => item.score >= (artistHints.length > 0 ? 95 : 90))
       .sort((left, right) => right.score - left.score);
 
     const match = ranked[0]?.track;
