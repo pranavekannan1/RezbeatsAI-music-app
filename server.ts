@@ -9,6 +9,11 @@ import ytdl from '@distube/ytdl-core';
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const YT_AUDIO_CACHE_TTL_MS = 5 * 60 * 1000;
+const YT_RESOLVER_PROVIDER_COOLDOWN_MS = 10 * 60 * 1000;
+const YT_RESOLVER_NETWORK_COOLDOWN_MS = 60 * 1000;
+const ytResolverProviderCooldowns = new Map<string, number>();
+let ytdlResolverCooldownUntil = 0;
+let ytdlResolverInFlight = false;
 
 app.disable('x-powered-by');
 
@@ -2279,22 +2284,40 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
         .replace(/\s+/g, ' ')
         .slice(0, 240);
     };
+    const statusFromError = (error: unknown) => {
+      if (!(error instanceof Error)) return 0;
+      const match = /(?:HTTP |Status code: )(\d{3})/.exec(error.message);
+      return match ? Number(match[1]) : 0;
+    };
 
     const resolveWithYtdl = async () => {
-      const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`, {
-        requestOptions: { signal: AbortSignal.timeout(8000) },
-      });
-      const bitrateOf = (format: ytdl.videoFormat) =>
-        Number(format.audioBitrate || format.bitrate) * (format.audioBitrate ? 1000 : 1);
-      const formats = ytdl.filterFormats(info.formats, 'audio')
-        .filter((format) => format.url && (format.audioBitrate || format.bitrate))
-        .sort((left, right) => bitrateOf(left) - bitrateOf(right));
-      const cappedFormats = formats.filter((format) => bitrateOf(format) <= maxBitrate);
-      const availableFormats = cappedFormats.length > 0 ? cappedFormats : formats.slice(0, 1);
-      const mp4Formats = availableFormats.filter((format) => format.container === 'mp4');
-      const format = (mp4Formats.length > 0 ? mp4Formats : availableFormats).at(-1);
-      if (!format?.url) throw new Error('No direct audio format available');
-      return format.url;
+      if (ytdlResolverInFlight) throw new Error('YouTube resolver busy');
+      if (Date.now() < ytdlResolverCooldownUntil) throw new Error('YouTube resolver rate-limit cooldown');
+
+      ytdlResolverInFlight = true;
+      try {
+        const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`, {
+          requestOptions: { signal: AbortSignal.timeout(8000) },
+        });
+        const bitrateOf = (format: ytdl.videoFormat) =>
+          Number(format.audioBitrate || format.bitrate) * (format.audioBitrate ? 1000 : 1);
+        const formats = ytdl.filterFormats(info.formats, 'audio')
+          .filter((format) => format.url && (format.audioBitrate || format.bitrate))
+          .sort((left, right) => bitrateOf(left) - bitrateOf(right));
+        const cappedFormats = formats.filter((format) => bitrateOf(format) <= maxBitrate);
+        const availableFormats = cappedFormats.length > 0 ? cappedFormats : formats.slice(0, 1);
+        const mp4Formats = availableFormats.filter((format) => format.container === 'mp4');
+        const format = (mp4Formats.length > 0 ? mp4Formats : availableFormats).at(-1);
+        if (!format?.url) throw new Error('No direct audio format available');
+        return format.url;
+      } catch (error) {
+        if (statusFromError(error) === 429) {
+          ytdlResolverCooldownUntil = Date.now() + YT_RESOLVER_PROVIDER_COOLDOWN_MS;
+        }
+        throw error;
+      } finally {
+        ytdlResolverInFlight = false;
+      }
     };
 
     const resolveWithInstance = async (instance: string) => {
@@ -2319,18 +2342,36 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
       return format.url as string;
     };
 
-    const resolverTasks = [
-      resolveWithYtdl().catch((error: unknown) => {
+    const resolverTasks: Promise<string>[] = [];
+    if (!ytdlResolverInFlight && Date.now() >= ytdlResolverCooldownUntil) {
+      resolverTasks.push(resolveWithYtdl().catch((error: unknown) => {
+        const status = statusFromError(error);
+        if (status === 429) {
+          ytdlResolverCooldownUntil = Date.now() + YT_RESOLVER_PROVIDER_COOLDOWN_MS;
+        }
         console.warn('YouTube audio resolver failed', { provider: 'ytdl-core', error: resolverErrorMessage(error) });
         throw error;
-      }),
-      ...instances.map((instance) => resolveWithInstance(instance).catch((error: unknown) => {
-        console.warn('YouTube audio resolver failed', { provider: instance, error: resolverErrorMessage(error) });
+      }));
+    }
+    for (const instance of instances) {
+      if ((ytResolverProviderCooldowns.get(instance) || 0) > Date.now()) continue;
+      resolverTasks.push(resolveWithInstance(instance).catch((error: unknown) => {
+        const status = statusFromError(error);
+        const cooldown = status === 403 || status === 429
+          ? YT_RESOLVER_PROVIDER_COOLDOWN_MS
+          : YT_RESOLVER_NETWORK_COOLDOWN_MS;
+        ytResolverProviderCooldowns.set(instance, Date.now() + cooldown);
+        console.warn('YouTube audio resolver failed', {
+          provider: instance,
+          error: resolverErrorMessage(error),
+          cooldownSeconds: cooldown / 1000,
+        });
         throw error;
-      })),
-    ];
+      }));
+    }
 
     try {
+      if (resolverTasks.length === 0) throw new Error('All YouTube providers are cooling down');
       const audioUrl = await Promise.any(resolverTasks);
       responseCache.set(cacheKey, { data: audioUrl, timestamp: Date.now() });
       return res.redirect(audioUrl);
@@ -2341,7 +2382,8 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
       });
     }
 
-    return res.status(502).json({ success: false, message: 'No audio stream could be resolved' });
+    res.setHeader('Retry-After', String(Math.ceil(YT_RESOLVER_NETWORK_COOLDOWN_MS / 1000)));
+    return res.status(503).json({ success: false, message: 'YouTube audio providers are temporarily unavailable' });
   } catch (error: unknown) {
     console.error('YouTube audio stream resolution failed:', error);
     return res.status(502).json({ success: false, message: 'Audio stream resolution failed' });
