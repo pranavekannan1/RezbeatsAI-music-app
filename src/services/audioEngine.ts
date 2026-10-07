@@ -30,6 +30,7 @@ class AudioEngine {
   private ytCandidateIdx = 0;
   // trackId -> matched YouTube video IDs, so replays / resumes don't hit the network again
   private ytMatchCache = new Map<string, string[]>();
+  private attemptedCatalogFallbackUrls = new Set<string>();
   // Bumped on every playTrack(); lets async work detect that the user has moved on
   private playToken = 0;
   // Track id we've already sent a play-report for, so retries/resumes/polling don't double-count
@@ -358,6 +359,7 @@ class AudioEngine {
     this.stopGenerativeSynth();
     this.ytCandidates = [];
     this.ytCandidateIdx = 0;
+    this.attemptedCatalogFallbackUrls.clear();
 
     const ytId = this.extractYouTubeId(track);
     const qualityTrack = applyQualityToTrackUrl(track, quality);
@@ -388,12 +390,8 @@ class AudioEngine {
     this.notifyPlaybackState(true); // user intent: they pressed play
     this.notifyTimeUpdate(0, track.durationSec || 0);
 
-    const catalogTrack = await findFullSongCatalogMatch(track);
+    if (await this.tryPlayCatalogFallback(track, token)) return;
     if (token !== this.playToken || !this.isPlaying) return;
-    if (catalogTrack?.audioUrl) {
-      this.playDirectStream(catalogTrack.audioUrl, token);
-      return;
-    }
 
     let ids = this.ytMatchCache.get(track.id);
     if (!ids || ids.length === 0) {
@@ -455,17 +453,36 @@ class AudioEngine {
     quality: AudioQuality,
     token: number,
   ) {
-    const catalogTrack = await findFullSongCatalogMatch(track);
+    if (await this.tryPlayCatalogFallback(track, token)) return;
     if (token !== this.playToken || !this.userWantsPlay) return;
-    if (catalogTrack?.audioUrl) {
-      this.playDirectStream(catalogTrack.audioUrl, token);
-      return;
-    }
 
     const resolverUrl = new URL(apiUrl('/api/music/resolve-yt-audio'));
     resolverUrl.searchParams.set('id', videoId);
     resolverUrl.searchParams.set('quality', quality);
     this.playDirectStream(resolverUrl.toString(), token);
+  }
+
+  private async tryPlayCatalogFallback(track: Track, token: number): Promise<boolean> {
+    if (this.attemptedCatalogFallbackUrls.size >= 3) return false;
+    try {
+      const catalogTrack = await findFullSongCatalogMatch(track);
+      if (token !== this.playToken || !this.userWantsPlay) return false;
+      const audioUrl = catalogTrack?.audioUrl;
+      if (
+        !audioUrl ||
+        this.attemptedCatalogFallbackUrls.has(audioUrl) ||
+        this.attemptedCatalogFallbackUrls.size >= 3
+      ) {
+        return false;
+      }
+
+      this.attemptedCatalogFallbackUrls.add(audioUrl);
+      this.playDirectStream(audioUrl, token);
+      return true;
+    } catch (error) {
+      console.warn('Could not find a full-track catalog fallback:', error);
+      return false;
+    }
   }
 
   private clearStartupWatchdog() {
@@ -546,18 +563,8 @@ class AudioEngine {
     console.warn('Audio stream failed; trying another source:', error);
 
     const track = this.currentTrack;
-    if (track) {
-      try {
-        const catalogTrack = await findFullSongCatalogMatch(track);
-        if (token !== this.playToken || !this.userWantsPlay) return;
-        if (catalogTrack?.audioUrl) {
-          this.playDirectStream(catalogTrack.audioUrl, token);
-          return;
-        }
-      } catch (lookupError) {
-        console.warn('Could not find a full-track catalog fallback:', lookupError);
-      }
-    }
+    if (track && await this.tryPlayCatalogFallback(track, token)) return;
+    if (token !== this.playToken || !this.userWantsPlay) return;
 
     if (this.ytCandidateIdx + 1 < this.ytCandidates.length) {
       this.ytCandidateIdx += 1;

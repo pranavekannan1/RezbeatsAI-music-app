@@ -1513,16 +1513,24 @@ app.get('/api/music/full-song-match', async (req, res) => {
   try {
     const rawSearchTitle = title.split(/\s+\|\s+/)[0].trim();
     const searchTitle = cleanTitleForMatch(rawSearchTitle) || rawSearchTitle;
-    const searchData = await fetchJson(
-      `https://www.jiosaavn.com/api.php?__call=search.getResults&_marker=0&api_version=4&_format=json&n=10&p=1&q=${encodeURIComponent(searchTitle)}`,
-      4000,
-    );
-    if (!searchData) {
+    const searchTerms = Array.from(new Set([
+      searchTitle,
+      artist ? `${searchTitle} ${artist}`.trim() : '',
+    ].filter(Boolean)));
+    const searchResults = await Promise.all(searchTerms.map((term) =>
+      fetchJson(
+        `https://www.jiosaavn.com/api.php?__call=search.getResults&_marker=0&api_version=4&_format=json&n=10&p=1&q=${encodeURIComponent(term)}`,
+        5000,
+      )
+    ));
+    if (searchResults.every((result) => result === null)) {
       console.error('Full-song catalog search provider returned no response');
       return res.status(502).json({ success: false, message: 'Full-song catalog is unavailable' });
     }
 
-    const songIds = (searchData.results || []).map((item: any) => item?.id).filter(Boolean).slice(0, 10);
+    const songIds = Array.from(new Set(searchResults.flatMap((result) =>
+      (result?.results || []).map((item: any) => item?.id).filter(Boolean)
+    ))).slice(0, 20);
     if (songIds.length === 0) {
       return res.status(404).json({ success: false, message: 'No matching full-length catalog track found' });
     }

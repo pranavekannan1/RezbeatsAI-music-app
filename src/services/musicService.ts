@@ -490,7 +490,7 @@ export async function findFullSongCatalogMatch(
       duration: String(Math.round(track.durationSec || 0)),
     });
     const response = await apiFetch(`/api/music/full-song-match?${params.toString()}`, {
-      signal: AbortSignal.timeout(9500),
+      signal: AbortSignal.timeout(15000),
     });
     if (response.status === 404) return null;
     if (!response.ok) {
