@@ -5,7 +5,6 @@ import {
   getAppTheme,
   setAppTheme,
   getAudioQuality,
-  setAudioQuality,
   formatQualityLabel,
   getOnRepeatTracks,
   getUserTasteProfile,
@@ -15,13 +14,7 @@ import { ThemeSelector } from '../components/ThemeSelector';
 import { logoutFromFirebase } from '../services/firebase';
 import { AudioQualitySelector } from '../components/AudioQualitySelector';
 
-interface ProfileScreenProps {
-  onOpenStudio: (prompt?: string) => void;
-  onOpenAuth?: () => void;
-  onOpenQuality?: () => void;
-}
-
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onOpenStudio }) => {
+export const ProfileScreen: React.FC = () => {
   const [user, setUser] = useState<UserAuthProfile>(getAuthUser());
   const [theme, setTheme] = useState<AppTheme>(getAppTheme());
   const [quality, setQuality] = useState<AudioQuality>(getAudioQuality());

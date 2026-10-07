@@ -178,7 +178,7 @@ const VERIFIED_OPEN_RADIOS: any[] = [];
 
 
 // Health endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
     copyrightSafe: true,
@@ -264,7 +264,7 @@ function getLocalFallbackAlbums(language: string): any[] {
 }
 
 // Copyright Safety & License Declaration
-app.get('/api/music/copyright-guarantee', (req, res) => {
+app.get('/api/music/copyright-guarantee', (_req, res) => {
   res.json({
     status: 'guaranteed',
     title: '100% Copyright-Free & Royalty-Free Assurance',
@@ -284,7 +284,7 @@ app.get('/api/music/copyright-guarantee', (req, res) => {
 });
 
 // Priority Indian Open Broadcast Radios endpoint
-app.get('/api/music/radios/indian', (req, res) => {
+app.get('/api/music/radios/indian', (_req, res) => {
   res.json({
     success: true,
     total: VERIFIED_OPEN_RADIOS.length,
@@ -346,11 +346,6 @@ async function fetchAlbumSongs(albumId: string, albumTitle?: string): Promise<{ 
 }
 
 // Fetch top songs by Artist
-async function fetchArtistTracks(artistName: string): Promise<RoyaltyFreeTrack[]> {
-  if (!artistName) return [];
-  return searchYouTubeSongs(`${artistName} popular songs`, 8);
-}
-
 // Scrape YouTube playlist songs dynamically to support custom and official albums/playlists
 async function scrapeYoutubePlaylistSongs(playlistId: string): Promise<RoyaltyFreeTrack[]> {
   try {
@@ -1308,9 +1303,7 @@ app.get('/api/music/full-song-match', async (req, res) => {
     const ranked = candidates
       .filter((track) => track.isFullSong && track.audioUrl)
       .map((track) => {
-        const candidateTitle = normForMatch(track.title);
         const cleanedCandidateTitle = normForMatch(cleanTitleForMatch(track.title) || track.title);
-        const candidateTokens = candidateTitle.split(' ').filter((token) => token.length > 1);
         const cleanedCandidateTokens = cleanedCandidateTitle.split(' ').filter((token) => token.length > 1);
         const titleHits = wantedTokens.filter((token) => cleanedCandidateTokens.includes(token)).length;
         const titleCoverage = wantedTokens.length ? titleHits / wantedTokens.length : 0;
@@ -1667,52 +1660,6 @@ app.get('/api/music/youtube-video', async (req, res) => {
 });
 
 // Scrape YouTube playlist search results to support exact movie collections, compilation playlists, and albums
-async function scrapeYoutubePlaylists(query: string): Promise<any[]> {
-  try {
-    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAw%253D%253D`;
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-      },
-      signal: AbortSignal.timeout(5000)
-    });
-    if (!response.ok) return [];
-    const html = await response.text();
-    const results: any[] = [];
-    const seen = new Set<string>();
-
-    const playlistRegex = /"playlistRenderer":\{"playlistId":"([a-zA-Z0-9_-]+)"(.*?)"title":\{"runs":\[\{"text":"(.*?)"\}\]/g;
-    let match;
-    while ((match = playlistRegex.exec(html)) !== null) {
-      const playlistId = match[1];
-      const rawTitle = match[3] || '';
-      const title = rawTitle.replace(/\\u0026/g, '&').replace(/\\"/g, '"');
-      
-      let videoCount = 15;
-      const countMatch = match[2].match(/"videoCount":"(\d+)"/);
-      if (countMatch && countMatch[1]) {
-        videoCount = parseInt(countMatch[1], 10);
-      }
-
-      if (playlistId && title && !seen.has(playlistId)) {
-        seen.add(playlistId);
-        results.push({
-          id: `yt_playlist_${playlistId}`,
-          title: title,
-          videoCount,
-          playlistId
-        });
-        if (results.length >= 8) break;
-      }
-    }
-    return results;
-  } catch (err) {
-    console.warn('Error scraping YouTube playlists:', err);
-    return [];
-  }
-}
-
 // Filter to keep ONLY songs/music and exclude reaction, trailer, gameplay, and vlogs
 function isMusicSong(title: string, author?: string): boolean {
   if (!title) return false;
@@ -2410,10 +2357,9 @@ app.get('/api/music/yt-match', async (req, res) => {
 });
 
 // Auto-Location intelligence endpoint
-app.get('/api/music/location', async (req, res) => {
+app.get('/api/music/location', async (_req, res) => {
   try {
     // Attempt location detection from client headers or IP
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     let detectedCountry = 'India';
     let detectedRegion = 'India';
     let suggestedLanguage = 'hindi';
@@ -2463,7 +2409,7 @@ async function startServer() {
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

@@ -7,21 +7,18 @@ import {
   createPlaylist,
   deletePlaylist,
   saveLikedTrack,
-  isTrackLiked,
   getOnRepeatTracks,
 } from '../services/musicService';
 import { RECENTLY_ADDED_COLLECTION } from '../data/musicData';
 
 interface LibraryScreenProps {
   onPlayTrack: (track: Track, queue?: Track[]) => void;
-  onOpenStudio: (prompt?: string) => void;
   currentTrackId?: string;
   isPlaying?: boolean;
 }
 
 export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   onPlayTrack,
-  onOpenStudio,
   currentTrackId,
   isPlaying,
 }) => {

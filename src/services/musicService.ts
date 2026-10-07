@@ -9,8 +9,6 @@ import {
   TasteRecommendation,
   GroupedSearchResults,
   MovieSearchResult,
-  ArtistSearchResult,
-  PlaylistSearchResult,
 } from '../types';
 
 const DEFAULT_API_BASE_URL = 'https://music-app-based-on-ai-2.onrender.com';
@@ -1171,7 +1169,6 @@ import { SongLyrics } from '../types';
 
 export function getTrackLyrics(track: Track): SongLyrics {
   const titleLower = track.title.toLowerCase();
-  const artistLower = track.artist.toLowerCase();
 
   if (titleLower.includes('yaman') || titleLower.includes('sitar')) {
     return {

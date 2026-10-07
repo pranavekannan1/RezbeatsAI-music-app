@@ -9,7 +9,6 @@ import {
   saveLikedTrack,
   getLiveSearchSuggestions,
   SearchSuggestionItem,
-  detectUserLocation,
   apiFetch,
   getAuthUser,
 } from '../services/musicService';
@@ -123,7 +122,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [groupedResults, setGroupedResults] = useState<GroupedSearchResults | null>(null);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
-  const [userRegion, setUserRegion] = useState<string>('India');
   const [openMenuTrackId, setOpenMenuTrackId] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -212,12 +210,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
       searchKey: 'Deep Focus Bansuri Flute',
     },
   ];
-
-  useEffect(() => {
-    detectUserLocation().then((loc) => {
-      setUserRegion(loc.region || loc.country || 'India');
-    });
-  }, []);
 
   // Handle live typeahead suggestions on keystroke
   const handleInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {

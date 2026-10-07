@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Track, TabType, UserTasteProfile, MovieSearchResult } from '../types';
+import { Track, TabType, UserTasteProfile } from '../types';
 import {
   INDIAN_LANGUAGES,
   INDIAN_CULTURAL_MOODS,
@@ -12,7 +12,6 @@ import {
   saveLikedTrack,
   isTrackLiked,
   detectUserLocation,
-  UserLocationInfo,
   getLiveSearchSuggestions,
   SearchSuggestionItem,
   getRecentlyPlayed,
@@ -26,7 +25,6 @@ import { saveAccountSearchHistory, loadAccountSearchHistory } from '../services/
 
 interface HomeScreenProps {
   onPlayTrack: (track: Track, queue?: Track[]) => void;
-  onOpenStudio: (initialPrompt?: string) => void;
   onNavigateTab?: (tab: TabType) => void;
   currentTrackId?: string;
   isPlaying?: boolean;
@@ -36,7 +34,6 @@ interface HomeScreenProps {
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   onPlayTrack,
-  onOpenStudio,
   onNavigateTab,
   currentTrackId,
   isPlaying,
@@ -44,7 +41,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onPlayNext,
 }) => {
   const [userName, setUserName] = useState<string>('Pranav');
-  const [userLocation, setUserLocation] = useState<UserLocationInfo | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('all');
   const [activeTracks, setActiveTracks] = useState<Track[]>([]);
   const [latestMovieAlbums, setLatestMovieAlbums] = useState<any[]>([]);
@@ -132,7 +128,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
     // Auto-detect user location for region-based song loading
     detectUserLocation().then((loc) => {
-      setUserLocation(loc);
       loadLanguageTracks(loc.language || 'all');
     });
 
@@ -552,7 +547,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               {searchResults.map((track, idx) => {
                 const isCurrent = currentTrackId === track.id;
                 const isPlayingThis = isCurrent && isPlaying;
-                const liked = isTrackLiked(track.id, track.title);
 
                 return (
                   <div

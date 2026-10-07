@@ -57,8 +57,6 @@ export default function App() {
   const [showQualityModal, setShowQualityModal] =
     useState<boolean>(false);
 
-  const [studioInitialPrompt, setStudioInitialPrompt] =
-    useState<string | undefined>(undefined);
 
   const [progressPercent, setProgressPercent] =
     useState<number>(0);
@@ -621,21 +619,6 @@ export default function App() {
     setShowNowPlayingModal(true);
   };
 
-  const handleOpenStudioWithPrompt = (
-    prompt?: string
-  ) => {
-    if (prompt) {
-      setStudioInitialPrompt(prompt);
-    }
-
-    setCurrentTab('studio');
-
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth',
-    });
-  };
-
   /*
    * ------------------------------------------------------------
    * AUTHENTICATION GATE
@@ -690,9 +673,6 @@ export default function App() {
         {currentTab === 'home' && (
           <HomeScreen
             onPlayTrack={playTrack}
-            onOpenStudio={
-              handleOpenStudioWithPrompt
-            }
             onNavigateTab={setCurrentTab}
             currentTrackId={currentTrack.id}
             isPlaying={isPlaying}
@@ -722,9 +702,6 @@ export default function App() {
         {currentTab === 'library' && (
           <LibraryScreen
             onPlayTrack={playTrack}
-            onOpenStudio={
-              handleOpenStudioWithPrompt
-            }
             currentTrackId={currentTrack.id}
             isPlaying={isPlaying}
           />
@@ -736,18 +713,11 @@ export default function App() {
               handleStartSession
             }
             onPlaySingleTrack={playTrack}
-            initialPrompt={
-              studioInitialPrompt
-            }
           />
         )}
 
         {currentTab === 'profile' && (
-          <ProfileScreen
-            onOpenStudio={
-              handleOpenStudioWithPrompt
-            }
-          />
+          <ProfileScreen />
         )}
       </main>
 
