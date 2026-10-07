@@ -563,30 +563,75 @@ export async function searchWorldwideCatalog(query: string, limit: number = 25):
 
   const cleanQ = query.trim();
 
-  // 1. First attempt: Direct YouTube Data API v3 using user's API key
+  // Prefer catalog results with full metadata and playable catalog audio.
   try {
-    const directResults = await searchYouTubeDirect(cleanQ, limit);
-    if (directResults.length > 0) {
-      return directResults;
-    }
-  } catch (e) {
-    console.warn('Direct YouTube search attempt failed, trying backend:', e);
-  }
-
-  // 2. Second attempt: App backend /api/music/youtube-search
-  try {
-    const res = await apiFetch(`/api/music/youtube-search?q=${encodeURIComponent(cleanQ)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.tracks && data.tracks.length > 0) {
+    const params = new URLSearchParams({ q: cleanQ, limit: String(limit) });
+    const response = await apiFetch(`/api/music/search?${params.toString()}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && Array.isArray(data.tracks) && data.tracks.length > 0) {
         return data.tracks;
       }
     }
-  } catch (err) {
-    console.warn('Backend search error:', err);
+  } catch (error) {
+    console.warn('Catalog search failed, trying YouTube search:', error);
   }
 
-  return [];
+  // If catalog search has no results, try the configured YouTube Data API key.
+  try {
+    const directResults = await searchYouTubeDirect(cleanQ, limit);
+    if (directResults.length > 0) return directResults;
+  } catch (error) {
+    console.warn('Direct YouTube search failed:', error);
+  }
+
+  // The backend returns videos (not tracks); convert its response to the shape
+  // the player and search-results UI consume.
+  try {
+    const response = await apiFetch(`/api/music/youtube-search?q=${encodeURIComponent(cleanQ)}`);
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!data.success || !Array.isArray(data.videos)) return [];
+
+    return data.videos
+      .filter((video: any) =>
+        typeof video?.videoId === 'string' &&
+        /^[\w-]{11}$/.test(video.videoId) &&
+        typeof video?.title === 'string' &&
+        video.title.trim(),
+      )
+      .slice(0, limit)
+      .map((video: any): Track => {
+        const duration = typeof video.duration === 'string' ? video.duration : '03:45';
+        const durationParts = duration.split(':').map(Number);
+        const durationSec = durationParts.every(Number.isFinite)
+          ? durationParts.reduce((total, part) => total * 60 + part, 0)
+          : 225;
+        const watchUrl = `https://www.youtube.com/watch?v=${video.videoId}`;
+
+        return {
+          id: `youtube_${video.videoId}`,
+          title: video.title.trim(),
+          artist: video.author || 'YouTube Artist',
+          album: 'YouTube',
+          duration,
+          durationSec: durationSec || 225,
+          coverUrl: video.thumbnail || `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg`,
+          audioUrl: watchUrl,
+          sourceUrl: watchUrl,
+          genre: 'Music',
+          language: 'Worldwide',
+          isFullSong: true,
+          tags: ['youtube', 'search'],
+        };
+      });
+  } catch (error) {
+    console.warn('Backend YouTube search failed:', error);
+    return [];
+  }
 }
 
 /**
