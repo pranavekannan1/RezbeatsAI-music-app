@@ -5,18 +5,13 @@ import { searchWorldwideCatalog, apiFetch } from '../services/musicService';
 interface StudioScreenProps {
   onStartSession: (tracks: Track[]) => void;
   onPlaySingleTrack: (track: Track) => void;
-  initialPrompt?: string;
 }
 
 export const StudioScreen: React.FC<StudioScreenProps> = ({
   onStartSession,
   onPlaySingleTrack,
-  initialPrompt,
 }) => {
-  const [promptText, setPromptText] = useState(
-    initialPrompt ||
-      'Apologies aistudio is under development'
-  );
+  const [promptText, setPromptText] = useState('Apologies aistudio is under development');
   const [acousticWeight, setAcousticWeight] = useState(88);
   const [activeMode, setActiveMode] = useState<'dj' | 'playlist' | 'mood'>('dj');
   const [isGenerating, setIsGenerating] = useState(false);

@@ -50,23 +50,6 @@ class AudioEngine {
   private synthTotalDuration: number = 180;
   private synthTimer: number | null = null;
 
-  // Web Audio Synthesizer components
-  private ctx: AudioContext | null = null;
-  private masterGain: GainNode | null = null;
-  private oscillators: OscillatorNode[] = [];
-  private filter: BiquadFilterNode | null = null;
-  private analyser: AnalyserNode | null = null;
-  private chordInterval: number | null = null;
-  private currentChordIndex: number = 0;
-
-  // Ambient chord progressions in D Minor / F Major (atmospheric, neo-classical)
-  private chords = [
-    [146.83, 220.0, 261.63, 349.23], // Dm7 (D3, A3, C4, F4)
-    [130.81, 196.0, 261.63, 329.63], // Cmaj7 (C3, G3, C4, E4)
-    [116.54, 174.61, 220.0, 293.66], // Bbmaj7 (Bb2, F3, A3, D4)
-    [146.83, 174.61, 220.0, 329.63], // Dm9 (D3, F3, A3, E4)
-  ];
-
   constructor() {
     if (typeof window !== 'undefined') {
       this.initAudioElement();
@@ -218,7 +201,7 @@ class AudioEngine {
       }
     });
 
-    this.audioEl.addEventListener('error', (e) => {
+    this.audioEl.addEventListener('error', () => {
       if (!this.isUsingHtmlAudio) return;
       void this.handleStreamFailure(
         this.playToken,
@@ -226,29 +209,6 @@ class AudioEngine {
         `Audio element error (${this.audioEl?.error?.code ?? 'unknown'})`,
       );
     });
-  }
-
-  private initWebAudio() {
-    if (!this.ctx && typeof window !== 'undefined') {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        this.ctx = new AudioCtx();
-        this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.setValueAtTime(this.volume * 0.35, this.ctx.currentTime);
-
-        this.filter = this.ctx.createBiquadFilter();
-        this.filter.type = 'lowpass';
-        this.filter.frequency.setValueAtTime(520, this.ctx.currentTime);
-        this.filter.Q.setValueAtTime(2.0, this.ctx.currentTime);
-
-        this.analyser = this.ctx.createAnalyser();
-        this.analyser.fftSize = 64;
-
-        this.filter.connect(this.masterGain);
-        this.masterGain.connect(this.analyser);
-        this.analyser.connect(this.ctx.destination);
-      }
-    }
   }
 
   /**
@@ -356,7 +316,6 @@ class AudioEngine {
     this.playReportedFor = null;
     this.isLiveRadio = !!(track.isLiveRadio || track.duration === 'LIVE' || (track.durationSec === 0 && track.id.startsWith('radio_')));
     this.updateMediaSession(track);
-    this.stopGenerativeSynth();
     this.ytCandidates = [];
     this.ytCandidateIdx = 0;
     this.attemptedCatalogFallbackUrls.clear();
@@ -673,7 +632,6 @@ class AudioEngine {
    */
   private startGenerativeFallback() {
     this.isUsingHtmlAudio = false;
-    this.stopGenerativeSynth(); // NEVER play detuned oscillator buzzing sounds
 
     if (this.audioEl) {
       this.audioEl.pause();
@@ -725,7 +683,6 @@ class AudioEngine {
     if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
       navigator.mediaSession.playbackState = 'paused';
     }
-    this.stopGenerativeSynth();
     if (this.synthTimer) {
       window.clearInterval(this.synthTimer);
       this.synthTimer = null;
@@ -798,92 +755,9 @@ class AudioEngine {
     if (this.audioEl) {
       this.audioEl.volume = this.volume;
     }
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setValueAtTime(this.volume * 0.35, this.ctx.currentTime);
-    }
-  }
-
-  // --- Generative Web Audio API Helpers ---
-
-  private playGenerativeSynth() {
-    this.initWebAudio();
-    if (!this.ctx) return;
-
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
-
-    this.notifyPlaybackState(true);
-    this.playChord(this.chords[this.currentChordIndex]);
-
-    if (this.chordInterval) {
-      window.clearInterval(this.chordInterval);
-    }
-    this.chordInterval = window.setInterval(() => {
-      if (!this.isPlaying) return;
-      this.currentChordIndex = (this.currentChordIndex + 1) % this.chords.length;
-      this.playChord(this.chords[this.currentChordIndex]);
-    }, 4500);
-  }
-
-  private stopGenerativeSynth() {
-    if (this.chordInterval) {
-      window.clearInterval(this.chordInterval);
-      this.chordInterval = null;
-    }
-    if (this.oscillators.length > 0) {
-      this.oscillators.forEach((osc) => {
-        try {
-          osc.stop();
-          osc.disconnect();
-        } catch {}
-      });
-      this.oscillators = [];
-    }
-  }
-
-  private playChord(frequencies: number[]) {
-    if (!this.ctx || !this.filter) return;
-    const now = this.ctx.currentTime;
-
-    this.oscillators.forEach((osc) => {
-      try {
-        osc.stop(now + 1.2);
-      } catch {}
-    });
-    this.oscillators = [];
-
-    frequencies.forEach((freq, idx) => {
-      if (!this.ctx || !this.filter) return;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
-      osc.type = idx === 0 ? 'sine' : idx % 2 === 0 ? 'triangle' : 'sine';
-      osc.frequency.setValueAtTime(freq, now);
-      osc.detune.setValueAtTime((idx - 1.5) * 4, now);
-
-      gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(0.08, now + 1.5);
-      gain.gain.exponentialRampToValueAtTime(0.05, now + 5.0);
-
-      osc.connect(gain);
-      gain.connect(this.filter);
-      osc.start(now);
-      this.oscillators.push(osc);
-    });
   }
 
   public getFrequencyData(): Uint8Array {
-    if (this.analyser && this.isPlaying) {
-      const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-      this.analyser.getByteFrequencyData(dataArray);
-
-      const sum = dataArray.reduce((acc, v) => acc + v, 0);
-      if (sum > 10) {
-        return dataArray;
-      }
-    }
-
     if (this.isPlaying) {
       const simulated = new Uint8Array(32);
       const time = Date.now() * 0.005;

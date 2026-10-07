@@ -50,23 +50,6 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onNavigate, onOpenQu
     return 'Dark';
   };
 
-  const getTabLabel = (tab: TabType) => {
-    switch (tab) {
-      case 'home':
-        return 'Home Feed';
-      case 'discover':
-        return 'Search Worldwide';
-      case 'radio':
-        return 'Live World Radio';
-      case 'studio':
-        return 'Soundscape Studio';
-      case 'library':
-        return 'Your Library';
-      case 'profile':
-        return 'Profile';
-    }
-  };
-
   return (
     <header className="app-header fixed top-0 inset-x-0 z-40 backdrop-blur-xl border-b transition-all">
       {/* Main Bar */}

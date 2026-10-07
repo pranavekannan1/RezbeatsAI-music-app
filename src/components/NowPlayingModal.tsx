@@ -9,7 +9,6 @@ import {
   getAudioQuality,
   formatQualityLabel,
   getTrackLyrics,
-  getYouTubeVideoDetails,
 } from '../services/musicService';
 import { AudioQualitySelector } from './AudioQualitySelector';
 

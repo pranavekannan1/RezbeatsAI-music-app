@@ -338,7 +338,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                       type="text"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. Pranav"
+                      placeholder="User Name"
                       className="w-full bg-[#1b1c24] border border-white/[0.08] focus:border-[#dbb8ff]/60 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-[#8d8396] focus:outline-none transition-all"
                       required={!isLogin}
                     />
