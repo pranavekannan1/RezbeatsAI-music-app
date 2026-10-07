@@ -1511,7 +1511,8 @@ app.get('/api/music/full-song-match', async (req, res) => {
   if (!title) return res.status(400).json({ success: false, message: 'title is required' });
 
   try {
-    const searchTitle = title.split(/\s+\|\s+/)[0].trim();
+    const rawSearchTitle = title.split(/\s+\|\s+/)[0].trim();
+    const searchTitle = cleanTitleForMatch(rawSearchTitle) || rawSearchTitle;
     const searchData = await fetchJson(
       `https://www.jiosaavn.com/api.php?__call=search.getResults&_marker=0&api_version=4&_format=json&n=10&p=1&q=${encodeURIComponent(searchTitle)}`,
       4000,
@@ -2421,7 +2422,7 @@ function normForMatch(s: string): string {
 function cleanTitleForMatch(title: string): string {
   return (title || '')
     .replace(/[\(\[][^\)\]]*[\)\]]/g, ' ')
-    .replace(/\s[-–—]\s.*(?:remaster|version|edit|mix|from\b|feat|live).*$/i, ' ')
+    .replace(/\s[-–—]\s.*(?:remaster|version|edit|mix|from\b|feat|live|video\s+song|official\s+video|lyrical?\s+video|official\s+audio).*$/i, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
