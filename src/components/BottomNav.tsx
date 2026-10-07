@@ -8,15 +8,17 @@ interface BottomNavProps {
 
 export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onTabChange }) => {
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-50 bg-[#0d0e12]/95 backdrop-blur-2xl border-t border-white/[0.06] shadow-[0_-4px_24px_rgba(0,0,0,0.7)]">
+    <nav aria-label="Main navigation" className="app-bottom-nav fixed bottom-0 inset-x-0 z-50 backdrop-blur-2xl border-t">
       <div className="flex justify-around items-center h-20 px-4 pb-[env(safe-area-inset-bottom)] relative max-w-[1720px] mx-auto">
         {/* 1. Home */}
         <button
+          type="button"
           onClick={() => onTabChange('home')}
-          className={`flex flex-col items-center justify-center gap-1 w-16 h-16 transition-all cursor-pointer ${
+          aria-current={currentTab === 'home' ? 'page' : undefined}
+          className={`app-nav-item app-focusable flex flex-col items-center justify-center gap-1 min-w-16 min-h-16 rounded-xl transition-all cursor-pointer ${
             currentTab === 'home'
-              ? 'text-[#dbb8ff] font-bold scale-105'
-              : 'text-[#cec2d6]/70 hover:text-[#e3e2e8]'
+              ? 'font-bold scale-105'
+              : ''
           }`}
         >
           <span className="material-symbols-outlined text-[24px]">home</span>
@@ -25,11 +27,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onTabChange })
 
         {/* 2. Explore / Search */}
         <button
+          type="button"
           onClick={() => onTabChange('discover')}
-          className={`flex flex-col items-center justify-center gap-1 w-16 h-16 transition-all cursor-pointer ${
+          aria-current={currentTab === 'discover' ? 'page' : undefined}
+          className={`app-nav-item app-focusable flex flex-col items-center justify-center gap-1 min-w-16 min-h-16 rounded-xl transition-all cursor-pointer ${
             currentTab === 'discover'
-              ? 'text-[#dbb8ff] font-bold scale-105'
-              : 'text-[#cec2d6]/70 hover:text-[#e3e2e8]'
+              ? 'font-bold scale-105'
+              : ''
           }`}
         >
           <span className="material-symbols-outlined text-[24px]">search</span>
@@ -38,11 +42,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onTabChange })
 
         {/* 3. Live World Radio (24/7 free streams) */}
         <button
+          type="button"
           onClick={() => onTabChange('radio')}
-          className={`flex flex-col items-center justify-center gap-1 w-16 h-16 transition-all cursor-pointer ${
+          aria-current={currentTab === 'radio' ? 'page' : undefined}
+          className={`app-nav-item app-focusable flex flex-col items-center justify-center gap-1 min-w-16 min-h-16 rounded-xl transition-all cursor-pointer ${
             currentTab === 'radio'
-              ? 'text-[#dbb8ff] font-bold scale-105'
-              : 'text-[#cec2d6]/70 hover:text-[#e3e2e8]'
+              ? 'font-bold scale-105'
+              : ''
           }`}
         >
           <div className="relative flex items-center justify-center">
@@ -54,11 +60,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onTabChange })
 
         {/* 4. Library */}
         <button
+          type="button"
           onClick={() => onTabChange('library')}
-          className={`flex flex-col items-center justify-center gap-1 w-16 h-16 transition-all cursor-pointer ${
+          aria-current={currentTab === 'library' ? 'page' : undefined}
+          className={`app-nav-item app-focusable flex flex-col items-center justify-center gap-1 min-w-16 min-h-16 rounded-xl transition-all cursor-pointer ${
             currentTab === 'library'
-              ? 'text-[#dbb8ff] font-bold scale-105'
-              : 'text-[#cec2d6]/70 hover:text-[#e3e2e8]'
+              ? 'font-bold scale-105'
+              : ''
           }`}
         >
           <span className="material-symbols-outlined text-[24px]">library_music</span>
@@ -67,17 +75,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, onTabChange })
 
         {/* 5. Soundscape Studio */}
         <button
+          type="button"
           onClick={() => onTabChange('studio')}
-          className={`flex flex-col items-center justify-center gap-1 w-16 h-16 transition-all cursor-pointer ${
+          aria-current={currentTab === 'studio' ? 'page' : undefined}
+          className={`app-nav-item app-focusable flex flex-col items-center justify-center gap-1 min-w-16 min-h-16 rounded-xl transition-all cursor-pointer ${
             currentTab === 'studio'
-              ? 'text-[#dbb8ff] font-bold scale-105'
-              : 'text-[#cec2d6]/70 hover:text-[#e3e2e8]'
+              ? 'font-bold scale-105'
+              : ''
           }`}
         >
-          <span className="material-symbols-outlined text-[23px] text-[#dbb8ff]/80">
+          <span className="material-symbols-outlined text-[23px] app-nav-accent">
             graphic_eq
           </span>
-          <span className="text-[10px] tracking-wide text-[#dbb8ff]/80">Studio</span>
+          <span className="text-[10px] tracking-wide app-nav-accent">Studio</span>
         </button>
       </div>
     </nav>

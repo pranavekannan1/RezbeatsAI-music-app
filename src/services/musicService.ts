@@ -16,9 +16,13 @@ import {
 const DEFAULT_API_BASE_URL = 'https://music-app-based-on-ai-2.onrender.com';
 const API_BASE_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '');
 
-export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+export function apiUrl(path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return fetch(`${API_BASE_URL}${normalizedPath}`, init);
+  return `${API_BASE_URL}${normalizedPath}`;
+}
+
+export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(apiUrl(path), init);
 }
 
 

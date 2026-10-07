@@ -68,12 +68,14 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onNavigate, onOpenQu
   };
 
   return (
-    <header className="fixed top-0 inset-x-0 z-40 bg-[#0d0e12]/90 backdrop-blur-xl border-b border-white/[0.04] shadow-[0_4px_24px_rgba(0,0,0,0.5)] transition-all">
+    <header className="app-header fixed top-0 inset-x-0 z-40 backdrop-blur-xl border-b transition-all">
       {/* Main Bar */}
       <div className="max-w-[1720px] mx-auto h-14 px-4 sm:px-6 lg:px-10 flex items-center justify-between gap-3">
-        <div 
+        <button
+          type="button"
           onClick={() => onNavigate('home')} 
-          className="flex items-center gap-2.5 cursor-pointer select-none group"
+          aria-label="RezbeatsAi home"
+          className="app-focusable flex items-center gap-2.5 cursor-pointer select-none group bg-transparent border-0 text-left"
         >
           <div className="relative">
             <img
@@ -89,7 +91,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onNavigate, onOpenQu
               {getThemeLabel(theme)}
             </span>
           </div>
-        </div>
+        </button>
 
         <div className="flex items-center gap-2">
           {/* PWA Install Button */}
@@ -97,9 +99,11 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onNavigate, onOpenQu
 
           {/* Theme Quick Switcher button */}
           <button
+            type="button"
             onClick={cycleTheme}
             title={`Switch Theme (Current: ${getThemeLabel(theme)})`}
-            className="w-8 h-8 rounded-full bg-[#1e1f26] border border-white/10 text-[#dbb8ff] flex items-center justify-center hover:bg-[#2a2b34] transition-all cursor-pointer"
+            aria-label={`Switch theme. Current theme: ${getThemeLabel(theme)}`}
+            className="app-header-control app-focusable w-10 h-10 rounded-full border flex items-center justify-center hover:bg-[#2a2b34] transition-all cursor-pointer"
           >
             <span className="material-symbols-outlined text-base">
               {theme === 'light' ? 'light_mode' : theme === 'sunset' ? 'wb_sunny' : 'dark_mode'}
@@ -108,9 +112,11 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onNavigate, onOpenQu
 
           {/* Audio Quality Badge */}
           <button
+            type="button"
             onClick={onOpenQuality}
             title="Streaming Quality"
-            className="px-2 py-1 rounded-full bg-[#1e1f26] border border-white/10 text-[10px] font-mono font-bold text-[#1db954] hover:bg-[#2a2b34] transition-all cursor-pointer hidden sm:flex items-center gap-1"
+            aria-label={`Streaming quality: ${quality === '320k' ? '320 kilobits per second' : quality}`}
+            className="app-header-control app-focusable min-h-10 px-3 py-1 rounded-full border text-[10px] font-mono font-bold text-[#1db954] hover:bg-[#2a2b34] transition-all cursor-pointer hidden sm:flex items-center gap-1"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-[#1db954]"></span>
             <span>{quality === '320k' ? '320k HD' : quality}</span>
@@ -118,11 +124,12 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onNavigate, onOpenQu
 
           {/* User Profile Avatar */}
           <button
+            type="button"
             aria-label={`Profile - ${user.name}`}
             onClick={() => onNavigate('profile')}
-            className={`w-9 h-9 flex items-center justify-center rounded-full transition-all cursor-pointer relative ${
+            className={`app-focusable w-10 h-10 flex items-center justify-center rounded-full transition-all cursor-pointer relative ${
               currentTab === 'profile'
-                ? 'ring-2 ring-[#dbb8ff] ring-offset-2 ring-offset-[#121317]'
+                ? 'app-profile-ring ring-2 ring-[#dbb8ff] ring-offset-2'
                 : 'hover:ring-1 hover:ring-[#dbb8ff]/50'
             }`}
           >
@@ -138,4 +145,3 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onNavigate, onOpenQu
     </header>
   );
 };
-

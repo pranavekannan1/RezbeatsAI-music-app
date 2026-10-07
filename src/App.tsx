@@ -84,6 +84,11 @@ export default function App() {
         event as CustomEvent<UserAuthProfile>;
 
       if (customEvent.detail) {
+        if (!customEvent.detail.isLoggedIn) {
+          audioEngine.stop();
+          setIsPlaying(false);
+          setProgressPercent(0);
+        }
         setCurrentUser(customEvent.detail);
       }
     };
@@ -281,6 +286,11 @@ export default function App() {
    */
 
   useEffect(() => {
+    if (!currentUser.isLoggedIn) {
+      audioEngine.stop();
+      return;
+    }
+
     audioEngine.setMediaSessionHandlers(
       () => {
         if (isPlaying) {
@@ -305,7 +315,7 @@ export default function App() {
         handlePrevTrack();
       }
     );
-  }, [isPlaying, currentTrack]);
+  }, [isPlaying, currentTrack, currentUser.isLoggedIn]);
 
   /*
    * ------------------------------------------------------------
