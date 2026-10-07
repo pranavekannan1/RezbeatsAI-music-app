@@ -3,10 +3,12 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import CryptoJS from 'crypto-js';
+import ytdl from '@distube/ytdl-core';
 
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+const YT_AUDIO_CACHE_TTL_MS = 5 * 60 * 1000;
 
 app.disable('x-powered-by');
 
@@ -2229,7 +2231,7 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
 
     const cacheKey = `yt_resolved_audio_${videoId}_${quality}`;
     const cached = responseCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) { // 30 mins TTL
+    if (cached && Date.now() - cached.timestamp < YT_AUDIO_CACHE_TTL_MS) {
       return res.redirect(cached.data);
     }
 
@@ -2241,38 +2243,65 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
       'https://iv.ggtyler.dev'
     ];
 
-    let audioUrl: string | null = null;
-    for (const instance of instances) {
-      try {
-        const detailsRes = await fetch(`${instance}/api/v1/videos/${videoId}`, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-          },
-          signal: AbortSignal.timeout(3000)
-        });
-        if (detailsRes.ok) {
-          const data = await detailsRes.json();
-          const audioFormats = (data.adaptiveFormats || [])
-            .filter((format: any) => format.type?.includes('audio/') && format.url && Number(format.bitrate) > 0)
-            .sort((left: any, right: any) => Number(left.bitrate) - Number(right.bitrate));
-          const cappedFormats = audioFormats.filter((item: any) => Number(item.bitrate) <= maxBitrate);
-          const availableFormats = cappedFormats.length > 0 ? cappedFormats : audioFormats;
-          const mp4Formats = availableFormats.filter((item: any) => item.type.includes('audio/mp4') || item.type.includes('audio/m4a'));
-          const format = (mp4Formats.length > 0 ? mp4Formats : availableFormats).at(-1);
+    const resolveWithYtdl = async () => {
+      const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`, {
+        requestOptions: { signal: AbortSignal.timeout(8000) },
+      });
+      const bitrateOf = (format: ytdl.videoFormat) =>
+        Number(format.audioBitrate || format.bitrate) * (format.audioBitrate ? 1000 : 1);
+      const formats = ytdl.filterFormats(info.formats, 'audio')
+        .filter((format) => format.url && (format.audioBitrate || format.bitrate))
+        .sort((left, right) => bitrateOf(left) - bitrateOf(right));
+      const cappedFormats = formats.filter((format) => bitrateOf(format) <= maxBitrate);
+      const availableFormats = cappedFormats.length > 0 ? cappedFormats : formats.slice(0, 1);
+      const mp4Formats = availableFormats.filter((format) => format.container === 'mp4');
+      const format = (mp4Formats.length > 0 ? mp4Formats : availableFormats).at(-1);
+      if (!format?.url) throw new Error('No direct audio format available');
+      return format.url;
+    };
 
-          if (format && format.url) {
-            audioUrl = format.url;
-            break;
-          }
-        }
-      } catch {
-        // Continue to next instance
-      }
-    }
+    const resolveWithInstance = async (instance: string) => {
+      const detailsRes = await fetch(`${instance}/api/v1/videos/${videoId}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+        },
+        signal: AbortSignal.timeout(3000)
+      });
+      if (!detailsRes.ok) throw new Error(`HTTP ${detailsRes.status}`);
 
-    if (audioUrl) {
+      const data = await detailsRes.json();
+      const audioFormats = (data.adaptiveFormats || [])
+        .filter((format: any) => format.type?.includes('audio/') && format.url && Number(format.bitrate) > 0)
+        .sort((left: any, right: any) => Number(left.bitrate) - Number(right.bitrate));
+      const cappedFormats = audioFormats.filter((format: any) => Number(format.bitrate) <= maxBitrate);
+      const availableFormats = cappedFormats.length > 0 ? cappedFormats : audioFormats.slice(0, 1);
+      const mp4Formats = availableFormats.filter((format: any) =>
+        format.type.includes('audio/mp4') || format.type.includes('audio/m4a'));
+      const format = (mp4Formats.length > 0 ? mp4Formats : availableFormats).at(-1);
+      if (!format?.url) throw new Error('No direct audio format available');
+      return format.url as string;
+    };
+
+    const resolverTasks = [
+      resolveWithYtdl().catch((error: unknown) => {
+        console.warn('YouTube audio resolver failed', { provider: 'ytdl-core', error: error instanceof Error ? error.name : 'UnknownError' });
+        throw error;
+      }),
+      ...instances.map((instance) => resolveWithInstance(instance).catch((error: unknown) => {
+        console.warn('YouTube audio resolver failed', { provider: instance, error: error instanceof Error ? error.message : 'UnknownError' });
+        throw error;
+      })),
+    ];
+
+    try {
+      const audioUrl = await Promise.any(resolverTasks);
       responseCache.set(cacheKey, { data: audioUrl, timestamp: Date.now() });
       return res.redirect(audioUrl);
+    } catch (error) {
+      console.error('All YouTube audio resolvers failed', {
+        videoId,
+        failures: error instanceof AggregateError ? error.errors.length : 'unknown',
+      });
     }
 
     return res.status(502).json({ success: false, message: 'No audio stream could be resolved' });
