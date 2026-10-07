@@ -2211,67 +2211,22 @@ app.get('/api/music/youtube-search', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Search query is required' });
     }
 
-    const cacheKey = `yt_search_${query.toLowerCase()}`;
+    const cacheKey = `yt_search_verified_v2_${query.toLowerCase()}`;
     const cached = responseCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS * 2) {
       return res.json({ success: true, videos: cached.data });
     }
 
-    let videos: any[] = [];
-    if (process.env.GROQ_API_KEY) {
-      try {
-        const prompt = `Search YouTube for the query "${query}". Extract and return a list of top 6 matching videos with details. Schema: array of objects with videoId, title, author, duration, and thumbnail. Ensure the results are real and accurate.`;
-        const genRes = await askGroq(prompt);
-
-        if (genRes) {
-          const cleanText = genRes.trim();
-          const parsed = JSON.parse(cleanText);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            videos = parsed.map(v => ({
-              ...v,
-              thumbnail: v.thumbnail || `https://img.youtube.com/vi/${v.videoId}/mqdefault.jpg`
-            }));
-          }
-        }
-      } catch (err) {
-        console.log('YouTube search locator successfully falling back to scraper mode.');
-      }
-    }
-
-    // Scraper fallback if Groq fails or returns an empty list
-    if (videos.length === 0) {
-      try {
-        const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-        const response = await fetch(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-          },
-          signal: AbortSignal.timeout(4500)
-        });
-        if (response.ok) {
-          const html = await response.text();
-          const videoIds: string[] = [];
-          const videoIdRegex = /"videoId":"([a-zA-Z0-9_-]{11})"/g;
-          let match;
-          while ((match = videoIdRegex.exec(html)) !== null) {
-            if (!videoIds.includes(match[1])) {
-              videoIds.push(match[1]);
-              if (videoIds.length >= 8) break;
-            }
-          }
-
-          videos = videoIds.map((id, idx) => ({
-            videoId: id,
-            title: `${query} Performance / Live Part ${idx + 1}`,
-            author: 'YouTube Contributor',
-            duration: '3:45',
-            thumbnail: `https://img.youtube.com/vi/${id}/mqdefault.jpg`
-          }));
-        }
-      } catch (err) {
-        console.error('YouTube search scraper fallback error:', err);
-      }
-    }
+    const scrapedTracks = await scrapeYoutubeTracks(query);
+    const videos = scrapedTracks
+      .filter((track) => track.videoId && track.title)
+      .map((track) => ({
+        videoId: track.videoId,
+        title: track.title,
+        author: track.author || 'YouTube Music',
+        duration: track.duration || '03:45',
+        thumbnail: track.thumbnail || `https://img.youtube.com/vi/${track.videoId}/mqdefault.jpg`,
+      }));
 
     responseCache.set(cacheKey, { data: videos, timestamp: Date.now() });
     res.json({ success: true, videos });
@@ -2309,6 +2264,13 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
       'https://invidious.privacydev.net',
       'https://iv.ggtyler.dev'
     ];
+    const resolverErrorMessage = (error: unknown) => {
+      if (!(error instanceof Error)) return 'UnknownError';
+      return error.message
+        .replace(/https?:\/\/\S+/gi, '[url]')
+        .replace(/\s+/g, ' ')
+        .slice(0, 240);
+    };
 
     const resolveWithYtdl = async () => {
       const info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`, {
@@ -2351,11 +2313,11 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
 
     const resolverTasks = [
       resolveWithYtdl().catch((error: unknown) => {
-        console.warn('YouTube audio resolver failed', { provider: 'ytdl-core', error: error instanceof Error ? error.name : 'UnknownError' });
+        console.warn('YouTube audio resolver failed', { provider: 'ytdl-core', error: resolverErrorMessage(error) });
         throw error;
       }),
       ...instances.map((instance) => resolveWithInstance(instance).catch((error: unknown) => {
-        console.warn('YouTube audio resolver failed', { provider: instance, error: error instanceof Error ? error.message : 'UnknownError' });
+        console.warn('YouTube audio resolver failed', { provider: instance, error: resolverErrorMessage(error) });
         throw error;
       })),
     ];

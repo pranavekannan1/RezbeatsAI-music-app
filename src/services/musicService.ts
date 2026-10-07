@@ -556,39 +556,107 @@ export async function triggerAiMusicRefresh(language: string = 'all'): Promise<b
 /**
  * Universal Search across 100% Copyright-Free & CC Catalog + Wikimedia Commons
  */
+const SEARCH_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'audio', 'from', 'full', 'music', 'official', 'song', 'songs',
+  'the', 'video', 'lyrics', 'lyric', 'hd', '4k', 'visualizer',
+]);
+const SEARCH_EXCLUDED_VARIANTS = [
+  '8d', 'bass boosted', 'cover', 'fan made', 'karaoke', 'live', 'mashup',
+  'instrumental', 'reaction', 'remix', 'reverb', 'shorts', 'slowed', 'sped up',
+];
+
+function normalizeMusicSearchQuery(query: string): string {
+  const titlePart = query.trim().split(/\s+\|\s+/)[0];
+  return titlePart
+    .replace(/\s*[-–—]\s*(?:official\s+)?(?:lyrical?\s+)?(?:music\s+)?(?:video\s+song|video|audio|lyrics?|song).*$/i, '')
+    .replace(/\s*[\[(](?:official|audio|video|lyrics?|music video|lyrical video)[^\])]*[\])]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreMusicSearchResult(track: Track, query: string): number | null {
+  const toSearchText = (value: string) => ` ${value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()} `;
+  const normalizedQuery = toSearchText(normalizeMusicSearchQuery(query));
+  const normalizedTitle = toSearchText(track.title);
+  if (SEARCH_EXCLUDED_VARIANTS.some((term) =>
+    normalizedTitle.includes(` ${term} `) && !normalizedQuery.includes(` ${term} `)
+  )) {
+    return null;
+  }
+
+  const normalize = (value: string) => value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter((token) => (token.length > 1 || /^\d+$/.test(token)) && !SEARCH_STOP_WORDS.has(token));
+
+  const queryTokens = normalize(query);
+  if (queryTokens.length === 0) return 1;
+
+  const titleTokens = new Set(normalize(track.title));
+  const artistTokens = new Set(normalize(track.artist || ''));
+  const albumTokens = new Set(normalize(track.album || ''));
+  const titleCoverage = queryTokens.filter((token) => titleTokens.has(token)).length / queryTokens.length;
+  const artistCoverage = queryTokens.filter((token) => artistTokens.has(token)).length / queryTokens.length;
+  const metadataCoverage = queryTokens.filter((token) =>
+    titleTokens.has(token) || artistTokens.has(token) || albumTokens.has(token)
+  ).length / queryTokens.length;
+
+  const isRelevant = queryTokens.length === 1
+    ? Math.max(titleCoverage, artistCoverage) >= 1
+    : titleCoverage >= 0.65 || artistCoverage >= 0.7 || metadataCoverage >= 0.8;
+  if (!isRelevant) return null;
+  return titleCoverage * 100 + artistCoverage * 45 + metadataCoverage * 15;
+}
+
 export async function searchWorldwideCatalog(query: string, limit: number = 25): Promise<Track[]> {
   if (!query || !query.trim()) {
     return [];
   }
 
-  const cleanQ = query.trim();
-
-  // Prefer catalog results with full metadata and playable catalog audio.
-  try {
-    const params = new URLSearchParams({ q: cleanQ, limit: String(limit) });
-    const response = await apiFetch(`/api/music/search?${params.toString()}`, {
+  const cleanQ = normalizeMusicSearchQuery(query) || query.trim();
+  const params = new URLSearchParams({ q: cleanQ, limit: String(Math.max(limit, 40)) });
+  const [catalogResult, directResult] = await Promise.allSettled([
+    apiFetch(`/api/music/search?${params.toString()}`, {
       signal: AbortSignal.timeout(15000),
-    });
-    if (response.ok) {
+    }).then(async (response) => {
+      if (!response.ok) return [];
       const data = await response.json();
-      if (data.success && Array.isArray(data.tracks) && data.tracks.length > 0) {
-        return data.tracks;
-      }
-    }
-  } catch (error) {
-    console.warn('Catalog search failed, trying YouTube search:', error);
-  }
+      return data.success && Array.isArray(data.tracks) ? data.tracks as Track[] : [];
+    }),
+    searchYouTubeDirect(cleanQ, Math.max(limit, 25)),
+  ]);
+  const candidates: Track[] = [];
+  if (catalogResult.status === 'fulfilled') candidates.push(...catalogResult.value);
+  else console.warn('Catalog search failed:', catalogResult.reason);
+  if (directResult.status === 'fulfilled') candidates.push(...directResult.value);
+  else console.warn('Direct YouTube search failed:', directResult.reason);
 
-  // If catalog search has no results, try the configured YouTube Data API key.
-  try {
-    const directResults = await searchYouTubeDirect(cleanQ, limit);
-    if (directResults.length > 0) return directResults;
-  } catch (error) {
-    console.warn('Direct YouTube search failed:', error);
-  }
+  const deduplicated = new Map<string, { track: Track; score: number }>();
+  for (const track of candidates) {
+    const score = scoreMusicSearchResult(track, cleanQ);
+    if (score === null) continue;
 
-  // The backend returns videos (not tracks); convert its response to the shape
-  // the player and search-results UI consume.
+    const videoId = track.id.match(/^(?:youtube_|yt_)([\w-]{11})$/)?.[1];
+    const key = videoId ? `youtube_${videoId}` : track.id;
+    const existing = deduplicated.get(key);
+    if (!existing || score > existing.score) deduplicated.set(key, { track, score });
+  }
+  const ranked = Array.from(deduplicated.values())
+    .sort((left, right) => right.score - left.score)
+    .map(({ track }) => track);
+  if (ranked.length > 0) return ranked.slice(0, limit);
+
+  // The backend returns verified video metadata; convert it to the track shape
+  // expected by the results view and player.
   try {
     const response = await apiFetch(`/api/music/youtube-search?q=${encodeURIComponent(cleanQ)}`);
     if (!response.ok) return [];
@@ -596,7 +664,7 @@ export async function searchWorldwideCatalog(query: string, limit: number = 25):
     const data = await response.json();
     if (!data.success || !Array.isArray(data.videos)) return [];
 
-    return data.videos
+    const fallbackTracks = data.videos
       .filter((video: any) =>
         typeof video?.videoId === 'string' &&
         /^[\w-]{11}$/.test(video.videoId) &&
@@ -628,6 +696,12 @@ export async function searchWorldwideCatalog(query: string, limit: number = 25):
           tags: ['youtube', 'search'],
         };
       });
+    return fallbackTracks
+      .map((track) => ({ track, score: scoreMusicSearchResult(track, cleanQ) }))
+      .filter((result): result is { track: Track; score: number } => result.score !== null)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, limit)
+      .map(({ track }) => track);
   } catch (error) {
     console.warn('Backend YouTube search failed:', error);
     return [];
