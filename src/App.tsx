@@ -182,6 +182,9 @@ export default function App() {
         }
       );
 
+    const unsubscribePlaybackState =
+      audioEngine.onPlaybackState(setIsPlaying);
+
     const unsubscribeEnded =
       audioEngine.onEnded(() => {
         const currentQueue =
@@ -252,6 +255,7 @@ export default function App() {
 
     return () => {
       unsubscribeTime();
+      unsubscribePlaybackState();
       unsubscribeEnded();
     };
   }, []);
@@ -293,13 +297,7 @@ export default function App() {
 
     audioEngine.setMediaSessionHandlers(
       () => {
-        if (isPlaying) {
-          audioEngine.pause();
-          setIsPlaying(false);
-        } else {
-          audioEngine.playTrack(currentTrack);
-          setIsPlaying(true);
-        }
+        audioEngine.play();
       },
 
       () => {
@@ -315,7 +313,7 @@ export default function App() {
         handlePrevTrack();
       }
     );
-  }, [isPlaying, currentTrack, currentUser.isLoggedIn]);
+  }, [currentUser.isLoggedIn]);
 
   /*
    * ------------------------------------------------------------

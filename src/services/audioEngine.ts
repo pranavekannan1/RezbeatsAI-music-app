@@ -3,6 +3,7 @@ import { apiUrl, applyQualityToTrackUrl, findYouTubeMatches, getAudioQuality, re
 
 type TimeUpdateCallback = (currentTime: number, duration: number) => void;
 type EndedCallback = () => void;
+type PlaybackStateCallback = (isPlaying: boolean) => void;
 
 /**
  * Universal Audio Engine for RezBeatsAI Music
@@ -36,6 +37,7 @@ class AudioEngine {
   // Listeners
   private timeListeners: TimeUpdateCallback[] = [];
   private endedListeners: EndedCallback[] = [];
+  private playbackStateListeners: PlaybackStateCallback[] = [];
 
   // Synth mode time simulation
   private synthCurrentTime: number = 0;
@@ -87,15 +89,7 @@ class AudioEngine {
     };
 
     document.addEventListener('visibilitychange', () => {
-      if (this.userWantsPlay) {
-        resumeIfWanted();
-        window.setTimeout(resumeIfWanted, 300);
-        window.setTimeout(resumeIfWanted, 1000);
-      }
-    });
-
-    window.addEventListener('pagehide', () => {
-      if (this.userWantsPlay) {
+      if (!document.hidden && this.userWantsPlay) {
         resumeIfWanted();
       }
     });
@@ -184,7 +178,7 @@ class AudioEngine {
 
     this.audioEl.addEventListener('playing', () => {
       if (!this.isUsingHtmlAudio) return;
-      this.isPlaying = true;
+      this.notifyPlaybackState(true);
       if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'playing';
       }
@@ -192,7 +186,7 @@ class AudioEngine {
 
     this.audioEl.addEventListener('pause', () => {
       if (!this.isUsingHtmlAudio) return;
-      this.isPlaying = false;
+      this.notifyPlaybackState(false);
       if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'paused';
       }
@@ -210,7 +204,7 @@ class AudioEngine {
 
     this.audioEl.addEventListener('ended', () => {
       if (!this.isUsingHtmlAudio) return;
-      this.isPlaying = false;
+      this.notifyPlaybackState(false);
       // Never auto-advance for live radio streams
       if (!this.isLiveRadio) {
         this.notifyEnded();
@@ -283,6 +277,26 @@ class AudioEngine {
     return () => {
       this.endedListeners = this.endedListeners.filter((cb) => cb !== callback);
     };
+  }
+
+  public onPlaybackState(callback: PlaybackStateCallback): () => void {
+    this.playbackStateListeners.push(callback);
+    callback(this.isPlaying);
+
+    return () => {
+      this.playbackStateListeners = this.playbackStateListeners.filter((listener) => listener !== callback);
+    };
+  }
+
+  private notifyPlaybackState(isPlaying: boolean) {
+    this.isPlaying = isPlaying;
+    for (const listener of this.playbackStateListeners) {
+      try {
+        listener(isPlaying);
+      } catch (err) {
+        console.error('Error in onPlaybackState listener:', err);
+      }
+    }
   }
 
   private notifyTimeUpdate(currentTime: number, duration: number) {
@@ -362,7 +376,7 @@ class AudioEngine {
   private async playFullSongForPreviewTrack(track: Track, previewUrl: string | undefined, token: number) {
     // Silence whatever was playing while we look the song up
     this.pauseAllSources();
-    this.isPlaying = true; // user intent: they pressed play
+    this.notifyPlaybackState(true); // user intent: they pressed play
     this.notifyTimeUpdate(0, track.durationSec || 0);
 
     let ids = this.ytMatchCache.get(track.id);
@@ -436,7 +450,7 @@ class AudioEngine {
             this.audioEl?.pause();
             return;
           }
-          this.isPlaying = true;
+          this.notifyPlaybackState(true);
           this.userWantsPlay = true;
           if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
@@ -533,7 +547,7 @@ class AudioEngine {
     }
 
     console.warn('Track failed to play across all audio sources:', this.currentTrack?.title);
-    this.isPlaying = false;
+    this.notifyPlaybackState(false);
 
     // Gracefully advance to the next song in the queue after a brief delay
     if (!this.isLiveRadio) {
@@ -553,7 +567,7 @@ class AudioEngine {
       this.audioEl
         .play()
         .then(() => {
-          this.isPlaying = true;
+          this.notifyPlaybackState(true);
           if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
           }
@@ -566,14 +580,14 @@ class AudioEngine {
     } else if (this.currentTrack) {
       this.playTrack(this.currentTrack);
     } else {
-      this.isPlaying = false;
+      this.notifyPlaybackState(false);
     }
   }
 
   public pause() {
     this.userWantsPlay = false;
     this.playToken += 1;
-    this.isPlaying = false;
+    this.notifyPlaybackState(false);
 
     if (this.audioEl) {
       this.audioEl.pause();
@@ -669,7 +683,7 @@ class AudioEngine {
       this.ctx.resume();
     }
 
-    this.isPlaying = true;
+    this.notifyPlaybackState(true);
     this.playChord(this.chords[this.currentChordIndex]);
 
     if (this.chordInterval) {

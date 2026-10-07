@@ -2211,7 +2211,7 @@ app.get('/api/music/youtube-search', async (req, res) => {
   }
 });
 
-// Resolve a YouTube video ID to a direct, high-quality audio stream (supports background lockscreen playback!)
+// Resolve a YouTube video ID to a direct audio stream for the native audio player.
 app.get('/api/music/resolve-yt-audio', async (req, res) => {
   try {
     const videoId = (req.query.id as string) || '';
@@ -2223,8 +2223,8 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
       '48k': 48000,
     };
     const maxBitrate = maxBitrateByQuality[quality] || maxBitrateByQuality['320k'];
-    if (!videoId) {
-      return res.status(400).json({ success: false, message: 'Video ID is required' });
+    if (!/^[\w-]{11}$/.test(videoId)) {
+      return res.status(400).json({ success: false, message: 'A valid video ID is required' });
     }
 
     const cacheKey = `yt_resolved_audio_${videoId}_${quality}`;
@@ -2275,10 +2275,10 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
       return res.redirect(audioUrl);
     }
 
-    // Fallback: Redirect to a premium royalty-free stream if not resolvable immediately
-    return res.redirect('https://upload.wikimedia.org/wikipedia/commons/1/14/Sitar_sample_yaman.ogg');
-  } catch (error: any) {
-    return res.redirect('https://upload.wikimedia.org/wikipedia/commons/1/14/Sitar_sample_yaman.ogg');
+    return res.status(502).json({ success: false, message: 'No audio stream could be resolved' });
+  } catch (error: unknown) {
+    console.error('YouTube audio stream resolution failed:', error);
+    return res.status(502).json({ success: false, message: 'Audio stream resolution failed' });
   }
 });
 
@@ -2286,8 +2286,7 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
 // Full-length playback for preview-only catalog tracks (iTunes / Deezer)
 // ---------------------------------------------------------------------------
 // iTunes and Deezer only expose ~30s previews. For those tracks the client asks
-// this endpoint for matching YouTube video IDs and plays the best one through
-// the official YouTube IFrame Player (free, no key needed for playback).
+// this endpoint for matching YouTube video IDs and resolves them to native audio streams.
 //   - With YOUTUBE_API_KEY set: Data API v3 search (embeddable videos only) +
 //     videos.list for real durations. Free quota is 10,000 units/day and a
 //     search costs 100, so ~100 uncached lookups/day; results are cached 24h.
