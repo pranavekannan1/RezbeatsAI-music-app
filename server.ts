@@ -1504,6 +1504,72 @@ async function searchSaavnSongs(query: string, limit = 30): Promise<RoyaltyFreeT
   }
 }
 
+app.get('/api/music/full-song-match', async (req, res) => {
+  const title = String(req.query.title || '').trim().slice(0, 200);
+  const artist = String(req.query.artist || '').trim().slice(0, 200);
+  const durationSec = Math.max(0, Number.parseInt(String(req.query.duration || ''), 10) || 0);
+  if (!title) return res.status(400).json({ success: false, message: 'title is required' });
+
+  try {
+    const searchTitle = title.split(/\s+\|\s+/)[0].trim();
+    const searchData = await fetchJson(
+      `https://www.jiosaavn.com/api.php?__call=search.getResults&_marker=0&api_version=4&_format=json&n=10&p=1&q=${encodeURIComponent(searchTitle)}`,
+      4000,
+    );
+    if (!searchData) {
+      console.error('Full-song catalog search provider returned no response');
+      return res.status(502).json({ success: false, message: 'Full-song catalog is unavailable' });
+    }
+
+    const songIds = (searchData.results || []).map((item: any) => item?.id).filter(Boolean).slice(0, 10);
+    if (songIds.length === 0) {
+      return res.status(404).json({ success: false, message: 'No matching full-length catalog track found' });
+    }
+
+    const candidates = await fetchFullSaavnTracks(songIds);
+    if (candidates.length === 0) {
+      console.error('Full-song catalog returned matches but no playable audio streams');
+      return res.status(502).json({ success: false, message: 'Full-song audio is unavailable' });
+    }
+
+    const wantedTitle = normForMatch(cleanTitleForMatch(searchTitle) || searchTitle);
+    const wantedTokens = wantedTitle.split(' ').filter((token) => token.length > 1);
+    const artistTokens = normForMatch(artist).split(' ').filter((token) => token.length > 2);
+
+    const ranked = candidates
+      .filter((track) => track.isFullSong && track.audioUrl)
+      .map((track) => {
+        const candidateTitle = normForMatch(cleanTitleForMatch(track.title) || track.title);
+        const candidateTokens = candidateTitle.split(' ').filter((token) => token.length > 1);
+        const hitRatio = wantedTokens.length
+          ? wantedTokens.filter((token) => candidateTokens.includes(token)).length / wantedTokens.length
+          : 0;
+        if (hitRatio < 0.65) return { track, score: -1 };
+
+        const candidateArtist = normForMatch(track.artist);
+        const artistMatch = artistTokens.some((token) => candidateArtist.includes(token));
+        const durationDifference = durationSec && track.durationSec
+          ? Math.abs(track.durationSec - durationSec)
+          : 0;
+        if (durationDifference > Math.max(60, durationSec * 0.4)) return { track, score: -1 };
+
+        return {
+          track,
+          score: hitRatio * 60 + (artistMatch ? 25 : 0) + (durationDifference <= 10 ? 10 : 0),
+        };
+      })
+      .filter((item) => item.score >= 39)
+      .sort((left, right) => right.score - left.score);
+
+    const match = ranked[0]?.track;
+    if (!match) return res.status(404).json({ success: false, message: 'No matching full-length catalog track found' });
+    return res.json({ success: true, track: match });
+  } catch (error) {
+    console.error('Full-song catalog lookup failed:', error);
+    return res.status(502).json({ success: false, message: 'Full-song catalog lookup failed' });
+  }
+});
+
 async function searchSaavnAlbums(query: string, limit = 12): Promise<any[]> {
   try {
     const data = await fetchJson(`https://www.jiosaavn.com/api.php?__call=search.getAlbumResults&_marker=0&api_version=4&_format=json&n=${Math.min(limit, 20)}&p=1&q=${encodeURIComponent(query)}`);

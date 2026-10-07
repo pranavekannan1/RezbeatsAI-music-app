@@ -480,6 +480,41 @@ export async function findYouTubeMatches(
   return [];
 }
 
+export async function findFullSongCatalogMatch(
+  track: Pick<Track, 'title' | 'artist' | 'durationSec'>
+): Promise<Track | null> {
+  try {
+    const params = new URLSearchParams({
+      title: track.title,
+      artist: track.artist || '',
+      duration: String(Math.round(track.durationSec || 0)),
+    });
+    const response = await apiFetch(`/api/music/full-song-match?${params.toString()}`, {
+      signal: AbortSignal.timeout(9500),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      console.warn('Full-song catalog lookup failed:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const candidate = data?.track as Track | undefined;
+    if (
+      !data?.success ||
+      !candidate?.isFullSong ||
+      !candidate.audioUrl ||
+      !candidate.audioUrl.startsWith('https://')
+    ) {
+      return null;
+    }
+    return candidate;
+  } catch (error) {
+    console.warn('Full-song catalog lookup unavailable:', error);
+    return null;
+  }
+}
+
 /**
  * Perform a dynamic search on YouTube to get multiple matching videos
  */

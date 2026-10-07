@@ -1,5 +1,5 @@
 import { AudioQuality, Track } from '../types';
-import { apiUrl, applyQualityToTrackUrl, findYouTubeMatches, getAudioQuality, reportPlay } from './musicService';
+import { apiUrl, applyQualityToTrackUrl, findFullSongCatalogMatch, findYouTubeMatches, getAudioQuality, reportPlay } from './musicService';
 
 type TimeUpdateCallback = (currentTime: number, duration: number) => void;
 type EndedCallback = () => void;
@@ -365,11 +365,7 @@ class AudioEngine {
 
     if (ytId) {
       this.ytCandidates = [ytId];
-      // Native audio playback supports browser background playback and lock-screen controls.
-      const resolverUrl = new URL(apiUrl('/api/music/resolve-yt-audio'));
-      resolverUrl.searchParams.set('id', ytId);
-      resolverUrl.searchParams.set('quality', quality);
-      this.playDirectStream(resolverUrl.toString(), token);
+      void this.playYouTubeTrackWithCatalogFallback(track, ytId, quality, token);
     } else if (streamUrl && !this.isPreviewOnly(track, streamUrl) && !streamUrl.includes('resolve-yt-audio')) {
       // 2. Play direct audio stream (e.g. JioSaavn 320kbps or local audio)
       this.playDirectStream(streamUrl);
@@ -391,6 +387,13 @@ class AudioEngine {
     this.pauseAllSources();
     this.notifyPlaybackState(true); // user intent: they pressed play
     this.notifyTimeUpdate(0, track.durationSec || 0);
+
+    const catalogTrack = await findFullSongCatalogMatch(track);
+    if (token !== this.playToken || !this.isPlaying) return;
+    if (catalogTrack?.audioUrl) {
+      this.playDirectStream(catalogTrack.audioUrl, token);
+      return;
+    }
 
     let ids = this.ytMatchCache.get(track.id);
     if (!ids || ids.length === 0) {
@@ -444,6 +447,25 @@ class AudioEngine {
     resolverUrl.searchParams.set('id', videoId);
     resolverUrl.searchParams.set('quality', getAudioQuality());
     this.playDirectStream(resolverUrl.toString(), this.playToken);
+  }
+
+  private async playYouTubeTrackWithCatalogFallback(
+    track: Track,
+    videoId: string,
+    quality: AudioQuality,
+    token: number,
+  ) {
+    const catalogTrack = await findFullSongCatalogMatch(track);
+    if (token !== this.playToken || !this.userWantsPlay) return;
+    if (catalogTrack?.audioUrl) {
+      this.playDirectStream(catalogTrack.audioUrl, token);
+      return;
+    }
+
+    const resolverUrl = new URL(apiUrl('/api/music/resolve-yt-audio'));
+    resolverUrl.searchParams.set('id', videoId);
+    resolverUrl.searchParams.set('quality', quality);
+    this.playDirectStream(resolverUrl.toString(), token);
   }
 
   private clearStartupWatchdog() {
