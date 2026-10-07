@@ -971,13 +971,13 @@ export function setAudioQuality(quality: AudioQuality): void {
 export function formatQualityLabel(quality: AudioQuality): { label: string; desc: string; badge: string } {
   switch (quality) {
     case '320k':
-      return { label: 'Ultra HD (320 kbps)', desc: 'Studio Master Quality • Lossless Clarity', badge: '320 kbps' };
+      return { label: 'Highest Available', desc: 'Use the best bitrate provided by the source', badge: 'Up to 320 kbps' };
     case '160k':
-      return { label: 'High Quality (160 kbps)', desc: 'Balanced HD Audio • Low Latency', badge: '160 kbps' };
+      return { label: 'High Quality', desc: 'Limit stream bitrate to about 160 kbps', badge: 'Up to 160 kbps' };
     case '96k':
-      return { label: 'Standard (96 kbps)', desc: 'Smooth Playback • Moderate Data', badge: '96 kbps' };
+      return { label: 'Standard', desc: 'Limit stream bitrate to about 96 kbps', badge: 'Up to 96 kbps' };
     case '48k':
-      return { label: 'Data Saver (48 kbps)', desc: 'Ultra-low Bandwidth • Fast Load', badge: '48 kbps' };
+      return { label: 'Data Saver', desc: 'Use the closest available stream at or below 48 kbps', badge: 'Up to 48 kbps' };
   }
 }
 

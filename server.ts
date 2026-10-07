@@ -2215,11 +2215,19 @@ app.get('/api/music/youtube-search', async (req, res) => {
 app.get('/api/music/resolve-yt-audio', async (req, res) => {
   try {
     const videoId = (req.query.id as string) || '';
+    const quality = (req.query.quality as string) || '320k';
+    const maxBitrateByQuality: Record<string, number> = {
+      '320k': 320000,
+      '160k': 160000,
+      '96k': 96000,
+      '48k': 48000,
+    };
+    const maxBitrate = maxBitrateByQuality[quality] || maxBitrateByQuality['320k'];
     if (!videoId) {
       return res.status(400).json({ success: false, message: 'Video ID is required' });
     }
 
-    const cacheKey = `yt_resolved_audio_${videoId}`;
+    const cacheKey = `yt_resolved_audio_${videoId}_${quality}`;
     const cached = responseCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) { // 30 mins TTL
       return res.redirect(cached.data);
@@ -2244,13 +2252,13 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
         });
         if (detailsRes.ok) {
           const data = await detailsRes.json();
-          const adaptiveFormats = data.adaptiveFormats || [];
-          // Prioritize audio formats with audio/mp4 (AAC/m4a) or audio/webm
-          const format = adaptiveFormats.find(
-            (f: any) => (f.type && (f.type.includes('audio/mp4') || f.type.includes('audio/m4a')))
-          ) || adaptiveFormats.find(
-            (f: any) => (f.type && f.type.includes('audio/'))
-          );
+          const audioFormats = (data.adaptiveFormats || [])
+            .filter((format: any) => format.type?.includes('audio/') && format.url && Number(format.bitrate) > 0)
+            .sort((left: any, right: any) => Number(left.bitrate) - Number(right.bitrate));
+          const cappedFormats = audioFormats.filter((item: any) => Number(item.bitrate) <= maxBitrate);
+          const availableFormats = cappedFormats.length > 0 ? cappedFormats : audioFormats;
+          const mp4Formats = availableFormats.filter((item: any) => item.type.includes('audio/mp4') || item.type.includes('audio/m4a'));
+          const format = (mp4Formats.length > 0 ? mp4Formats : availableFormats).at(-1);
 
           if (format && format.url) {
             audioUrl = format.url;

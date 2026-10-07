@@ -36,7 +36,7 @@ export const AudioQualitySelector: React.FC<AudioQualitySelectorProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-[#e3e2e8]">Audio Streaming Quality</h3>
-              <p className="text-[11px] text-[#cec2d6]/80">Bitrate applied instantly to all tracks</p>
+              <p className="text-[11px] text-[#cec2d6]/80">Maximum bitrate; source availability varies</p>
             </div>
           </div>
           <button
@@ -90,7 +90,7 @@ export const AudioQualitySelector: React.FC<AudioQualitySelectorProps> = ({
         </div>
 
         <p className="text-[10px] text-[#cec2d6]/60 text-center">
-          Note: High bitrate audio uses more cellular data. Ultra HD (320kbps) provides full master clarity.
+          Higher quality uses more data. Actual bitrate depends on the available source stream.
         </p>
       </div>
     </div>

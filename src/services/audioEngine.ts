@@ -1,5 +1,5 @@
-import { Track } from '../types';
-import { findYouTubeMatches, reportPlay } from './musicService';
+import { AudioQuality, Track } from '../types';
+import { applyQualityToTrackUrl, findYouTubeMatches, getAudioQuality, reportPlay } from './musicService';
 
 type TimeUpdateCallback = (currentTime: number, duration: number) => void;
 type EndedCallback = () => void;
@@ -27,6 +27,7 @@ const SILENT_AUDIO_URI =
 class AudioEngine {
   private audioEl: HTMLAudioElement | null = null;
   private currentTrack: Track | null = null;
+  private resumeAt = 0;
   private isPlaying: boolean = false;
   private userWantsPlay: boolean = false;
   private volume: number = 0.8;
@@ -80,6 +81,12 @@ class AudioEngine {
       this.initAudioElement();
       this.setupYouTubeApi();
       this.setupBackgroundKeepAlive();
+      window.addEventListener('rezbeatsai_quality_change', (event) => {
+        const quality = (event as CustomEvent<AudioQuality>).detail;
+        if (!this.currentTrack || !this.userWantsPlay || !this.isUsingHtmlAudio) return;
+        this.resumeAt = this.getCurrentTime();
+        this.playTrack(this.currentTrack, quality);
+      });
     }
   }
 
@@ -327,12 +334,23 @@ class AudioEngine {
 
   private initAudioElement() {
     if (this.audioEl) return;
-    this.audioEl = new Audio();
+    this.audioEl = document.createElement('audio');
+    this.audioEl.setAttribute('playsinline', '');
     this.audioEl.crossOrigin = 'anonymous';
     this.audioEl.volume = this.volume;
+    this.audioEl.style.position = 'fixed';
+    this.audioEl.style.width = '1px';
+    this.audioEl.style.height = '1px';
+    this.audioEl.style.opacity = '0';
+    this.audioEl.style.pointerEvents = 'none';
+    document.body.appendChild(this.audioEl);
 
     this.audioEl.addEventListener('loadedmetadata', () => {
       if (!this.audioEl || !this.isUsingHtmlAudio) return;
+      if (this.resumeAt > 0 && Number.isFinite(this.audioEl.duration)) {
+        this.audioEl.currentTime = Math.min(this.resumeAt, this.audioEl.duration);
+        this.resumeAt = 0;
+      }
       const dur =
         this.audioEl.duration && !isNaN(this.audioEl.duration)
           ? this.audioEl.duration
@@ -456,7 +474,7 @@ class AudioEngine {
   /**
    * Play a specific Track (handles YouTube, previewUrl, direct stream, or YouTube match lookup)
    */
-  public playTrack(track: Track) {
+  public playTrack(track: Track, quality: AudioQuality = getAudioQuality()) {
     this.userWantsPlay = true;
     const token = ++this.playToken;
     this.currentTrack = track;
@@ -467,11 +485,15 @@ class AudioEngine {
     this.pendingYtVideoId = null;
 
     const ytId = this.extractYouTubeId(track);
-    const streamUrl = track.audioUrl || track.previewUrl;
+    const qualityTrack = applyQualityToTrackUrl(track, quality);
+    const streamUrl = qualityTrack.audioUrl || qualityTrack.previewUrl;
 
     if (ytId) {
-      // 1. Play via YouTube Audio background player
-      this.startYouTubeCandidates([ytId]);
+      // Native audio playback supports browser background playback and lock-screen controls.
+      const resolverUrl = new URL('/api/music/resolve-yt-audio', window.location.origin);
+      resolverUrl.searchParams.set('id', ytId);
+      resolverUrl.searchParams.set('quality', quality);
+      this.playDirectStream(resolverUrl.toString());
     } else if (streamUrl && !this.isPreviewOnly(track, streamUrl) && !streamUrl.includes('resolve-yt-audio')) {
       // 2. Play direct audio stream (e.g. JioSaavn 320kbps or local audio)
       this.playDirectStream(streamUrl);
