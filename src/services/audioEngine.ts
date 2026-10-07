@@ -545,13 +545,26 @@ class AudioEngine {
     this.clearStartupWatchdog();
     console.warn('Audio stream failed; trying another source:', error);
 
+    const track = this.currentTrack;
+    if (track) {
+      try {
+        const catalogTrack = await findFullSongCatalogMatch(track);
+        if (token !== this.playToken || !this.userWantsPlay) return;
+        if (catalogTrack?.audioUrl) {
+          this.playDirectStream(catalogTrack.audioUrl, token);
+          return;
+        }
+      } catch (lookupError) {
+        console.warn('Could not find a full-track catalog fallback:', lookupError);
+      }
+    }
+
     if (this.ytCandidateIdx + 1 < this.ytCandidates.length) {
       this.ytCandidateIdx += 1;
       this.playResolvedYouTubeCandidate(this.ytCandidates[this.ytCandidateIdx]);
       return;
     }
 
-    const track = this.currentTrack;
     if (track) {
       try {
         const candidates = await findYouTubeMatches(track);
