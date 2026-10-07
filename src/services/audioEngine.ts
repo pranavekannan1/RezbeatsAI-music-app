@@ -4,6 +4,7 @@ import { apiUrl, applyQualityToTrackUrl, findYouTubeMatches, getAudioQuality, re
 type TimeUpdateCallback = (currentTime: number, duration: number) => void;
 type EndedCallback = () => void;
 type PlaybackStateCallback = (isPlaying: boolean) => void;
+type PlaybackErrorCallback = (message: string) => void;
 
 /**
  * Universal Audio Engine for RezBeatsAI Music
@@ -38,6 +39,9 @@ class AudioEngine {
   private timeListeners: TimeUpdateCallback[] = [];
   private endedListeners: EndedCallback[] = [];
   private playbackStateListeners: PlaybackStateCallback[] = [];
+  private playbackErrorListeners: PlaybackErrorCallback[] = [];
+  private streamAttemptId = 0;
+  private failedStreamAttemptId = 0;
 
   // Synth mode time simulation
   private synthCurrentTime: number = 0;
@@ -213,22 +217,11 @@ class AudioEngine {
 
     this.audioEl.addEventListener('error', (e) => {
       if (!this.isUsingHtmlAudio) return;
-      console.warn('Audio stream playback error:', e);
-      if (this.currentTrack) {
-        if (
-          this.ytCandidateIdx + 1 < this.ytCandidates.length &&
-          this.userWantsPlay
-        ) {
-          this.ytCandidateIdx += 1;
-          this.playResolvedYouTubeCandidate(this.ytCandidates[this.ytCandidateIdx]);
-        } else if (!this.ytCandidates.length && this.userWantsPlay) {
-          void this.playFullSongForPreviewTrack(this.currentTrack, undefined, ++this.playToken);
-        } else {
-          this.startGenerativeFallback();
-        }
-      } else {
-        this.startGenerativeFallback();
-      }
+      void this.handleStreamFailure(
+        this.playToken,
+        this.streamAttemptId,
+        `Audio element error (${this.audioEl?.error?.code ?? 'unknown'})`,
+      );
     });
   }
 
@@ -286,6 +279,23 @@ class AudioEngine {
     return () => {
       this.playbackStateListeners = this.playbackStateListeners.filter((listener) => listener !== callback);
     };
+  }
+
+  public onPlaybackError(callback: PlaybackErrorCallback): () => void {
+    this.playbackErrorListeners.push(callback);
+    return () => {
+      this.playbackErrorListeners = this.playbackErrorListeners.filter((listener) => listener !== callback);
+    };
+  }
+
+  private notifyPlaybackError(message: string) {
+    for (const listener of this.playbackErrorListeners) {
+      try {
+        listener(message);
+      } catch (err) {
+        console.error('Error in onPlaybackError listener:', err);
+      }
+    }
   }
 
   private notifyPlaybackState(isPlaying: boolean) {
@@ -352,6 +362,7 @@ class AudioEngine {
     const streamUrl = qualityTrack.audioUrl || qualityTrack.previewUrl;
 
     if (ytId) {
+      this.ytCandidates = [ytId];
       // Native audio playback supports browser background playback and lock-screen controls.
       const resolverUrl = new URL(apiUrl('/api/music/resolve-yt-audio'));
       resolverUrl.searchParams.set('id', ytId);
@@ -438,6 +449,8 @@ class AudioEngine {
 
     if (this.audioEl) {
       this.audioEl.loop = false;
+      this.streamAttemptId += 1;
+      const attemptId = this.streamAttemptId;
       this.audioEl.src = streamUrl.startsWith('/api/')
         ? apiUrl(streamUrl)
         : streamUrl;
@@ -458,18 +471,62 @@ class AudioEngine {
           this.reportPlayOnce();
         })
         .catch((err) => {
-          if (token !== this.playToken || !this.userWantsPlay) return;
-          console.warn('HTML audio playback was rejected:', err);
-          if (this.ytCandidateIdx + 1 < this.ytCandidates.length) {
-            this.ytCandidateIdx += 1;
-            this.playResolvedYouTubeCandidate(this.ytCandidates[this.ytCandidateIdx]);
-          } else if (!this.ytCandidates.length && this.currentTrack) {
-            void this.playFullSongForPreviewTrack(this.currentTrack, undefined, ++this.playToken);
-          } else {
-            this.startGenerativeFallback();
-          }
+          void this.handleStreamFailure(token, attemptId, err);
         });
     }
+  }
+
+  private async handleStreamFailure(token: number, attemptId: number, error: unknown) {
+    if (
+      token !== this.playToken ||
+      attemptId !== this.streamAttemptId ||
+      attemptId === this.failedStreamAttemptId ||
+      !this.userWantsPlay
+    ) {
+      return;
+    }
+
+    this.failedStreamAttemptId = attemptId;
+    console.warn('Audio stream failed; trying another source:', error);
+
+    if (this.ytCandidateIdx + 1 < this.ytCandidates.length) {
+      this.ytCandidateIdx += 1;
+      this.playResolvedYouTubeCandidate(this.ytCandidates[this.ytCandidateIdx]);
+      return;
+    }
+
+    const track = this.currentTrack;
+    if (track) {
+      try {
+        const candidates = await findYouTubeMatches(track);
+        if (token !== this.playToken || !this.userWantsPlay) return;
+
+        const alreadyTried = new Set(this.ytCandidates);
+        const alternatives = candidates.filter((videoId) =>
+          /^[\w-]{11}$/.test(videoId) && !alreadyTried.has(videoId)
+        );
+        if (alternatives.length > 0) {
+          this.ytCandidates = [...this.ytCandidates, ...alternatives];
+          this.ytCandidateIdx += 1;
+          this.playResolvedYouTubeCandidate(this.ytCandidates[this.ytCandidateIdx]);
+          return;
+        }
+      } catch (lookupError) {
+        console.warn('Could not find an alternative audio source:', lookupError);
+      }
+
+      if (token !== this.playToken || !this.userWantsPlay) return;
+      this.isUsingHtmlAudio = false;
+      this.notifyPlaybackState(false);
+      const message = `Could not play "${track.title}". Check your connection and try again.`;
+      console.error(message, error);
+      this.notifyPlaybackError(message);
+      return;
+    }
+
+    this.isUsingHtmlAudio = false;
+    this.notifyPlaybackState(false);
+    this.notifyPlaybackError('Audio could not be played. Please try again.');
   }
 
   private reportPlayOnce() {
@@ -549,13 +606,8 @@ class AudioEngine {
     console.warn('Track failed to play across all audio sources:', this.currentTrack?.title);
     this.notifyPlaybackState(false);
 
-    // Gracefully advance to the next song in the queue after a brief delay
-    if (!this.isLiveRadio) {
-      window.setTimeout(() => {
-        if (!this.isPlaying && this.currentTrack) {
-          this.notifyEnded();
-        }
-      }, 1000);
+    if (this.currentTrack) {
+      this.notifyPlaybackError(`Could not play "${this.currentTrack.title}". Check your connection and try again.`);
     }
   }
 

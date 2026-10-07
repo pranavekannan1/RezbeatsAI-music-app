@@ -45,6 +45,9 @@ export default function App() {
   const [isPlaying, setIsPlaying] =
     useState<boolean>(false);
 
+  const [playbackError, setPlaybackError] =
+    useState<string | null>(null);
+
   const [showNowPlayingModal, setShowNowPlayingModal] =
     useState<boolean>(false);
 
@@ -183,7 +186,13 @@ export default function App() {
       );
 
     const unsubscribePlaybackState =
-      audioEngine.onPlaybackState(setIsPlaying);
+      audioEngine.onPlaybackState((playing) => {
+        setIsPlaying(playing);
+        if (playing) setPlaybackError(null);
+      });
+
+    const unsubscribePlaybackError =
+      audioEngine.onPlaybackError(setPlaybackError);
 
     const unsubscribeEnded =
       audioEngine.onEnded(() => {
@@ -256,6 +265,7 @@ export default function App() {
     return () => {
       unsubscribeTime();
       unsubscribePlaybackState();
+      unsubscribePlaybackError();
       unsubscribeEnded();
     };
   }, []);
@@ -322,6 +332,7 @@ export default function App() {
    */
 
   const togglePlay = () => {
+    setPlaybackError(null);
     if (isPlaying) {
       audioEngine.pause();
       setIsPlaying(false);
@@ -342,6 +353,7 @@ export default function App() {
     track: Track,
     newQueue?: Track[]
   ) => {
+    setPlaybackError(null);
     setCurrentTrack(track);
     setProgressPercent(0);
 
@@ -754,6 +766,37 @@ export default function App() {
         }
         hidden={showNowPlayingModal}
       />
+
+      {playbackError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="fixed top-16 left-1/2 z-[60] flex w-[min(92vw,34rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-red-500/30 bg-white px-4 py-3 text-sm text-slate-900 shadow-xl"
+        >
+          <span className="material-symbols-outlined text-red-600" aria-hidden="true">
+            error
+          </span>
+          <span className="min-w-0 flex-1">{playbackError}</span>
+          <button
+            type="button"
+            className="rounded-lg bg-violet-700 px-3 py-2 font-semibold text-white hover:bg-violet-800"
+            onClick={() => {
+              setPlaybackError(null);
+              audioEngine.playTrack(currentTrack);
+            }}
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss playback error"
+            className="rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            onClick={() => setPlaybackError(null)}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </div>
+      )}
 
       {showNowPlayingModal && (
         <NowPlayingModal
