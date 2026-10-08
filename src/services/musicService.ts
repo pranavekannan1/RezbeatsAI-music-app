@@ -343,11 +343,12 @@ export async function getTrendingIndianSongs(language: string = 'all'): Promise<
 
   // Filter local catalog based on selected tradition
   if (language === 'all') return [];
-  return [].filter(
-    (t) =>
+  const localCatalog: Track[] = [];
+  return localCatalog.filter(
+    (t: Track) =>
       t.genre?.toLowerCase().includes(language.toLowerCase()) ||
-      t.tags?.some((tag) => tag.toLowerCase().includes(language.toLowerCase()))
-  ).concat([]);
+      t.tags?.some((tag: string) => tag.toLowerCase().includes(language.toLowerCase()))
+  );
 }
 
 /**
@@ -675,7 +676,7 @@ export async function searchWorldwideCatalog(query: string, limit: number = 25):
         const duration = typeof video.duration === 'string' ? video.duration : '03:45';
         const durationParts = duration.split(':').map(Number);
         const durationSec = durationParts.every(Number.isFinite)
-          ? durationParts.reduce((total, part) => total * 60 + part, 0)
+          ? durationParts.reduce((total: number, part: number) => total * 60 + part, 0)
           : 225;
         const watchUrl = `https://www.youtube.com/watch?v=${video.videoId}`;
 
@@ -696,11 +697,11 @@ export async function searchWorldwideCatalog(query: string, limit: number = 25):
         };
       });
     return fallbackTracks
-      .map((track) => ({ track, score: scoreMusicSearchResult(track, cleanQ) }))
-      .filter((result): result is { track: Track; score: number } => result.score !== null)
-      .sort((left, right) => right.score - left.score)
+      .map((track: Track) => ({ track, score: scoreMusicSearchResult(track, cleanQ) }))
+      .filter((result: { track: Track; score: number | null }): result is { track: Track; score: number } => result.score !== null)
+      .sort((left: { track: Track; score: number }, right: { track: Track; score: number }) => right.score - left.score)
       .slice(0, limit)
-      .map(({ track }) => track);
+      .map(({ track }: { track: Track; score: number }) => track);
   } catch (error) {
     console.warn('Backend YouTube search failed:', error);
     return [];
