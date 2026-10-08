@@ -10,6 +10,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const YT_AUDIO_CACHE_TTL_MS = 5 * 60 * 1000;
 const YT_RESOLVER_PROVIDER_COOLDOWN_MS = 60 * 1000;
 const YT_RESOLVER_NETWORK_COOLDOWN_MS = 5 * 1000;
+const YT_YTDL_COOLDOWN_MS = 30 * 60 * 1000;
 const ytResolverProviderCooldowns = new Map<string, number>();
 const ytResolverRequestCache = new Map<string, Promise<string>>();
 let ytdlResolverCooldownUntil = 0;
@@ -2019,8 +2020,9 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
         if (!format?.url) throw new Error('No direct audio format available');
         return format.url;
       } catch (error) {
-        if (statusFromError(error) === 429) {
-          ytdlResolverCooldownUntil = Date.now() + YT_RESOLVER_PROVIDER_COOLDOWN_MS;
+        const status = statusFromError(error);
+        if (status === 429) {
+          ytdlResolverCooldownUntil = Date.now() + YT_YTDL_COOLDOWN_MS;
         }
         throw error;
       } finally {
@@ -2056,7 +2058,7 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
         orderedResolvers.push(() => resolveWithYtdl().catch((error: unknown) => {
           const status = statusFromError(error);
           if (status === 429) {
-            ytdlResolverCooldownUntil = Date.now() + YT_RESOLVER_PROVIDER_COOLDOWN_MS;
+            ytdlResolverCooldownUntil = Date.now() + YT_YTDL_COOLDOWN_MS;
           }
           console.warn('YouTube audio resolver failed', { provider: 'ytdl-core', error: resolverErrorMessage(error) });
           throw error;
