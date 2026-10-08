@@ -9,8 +9,9 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const YT_AUDIO_CACHE_TTL_MS = 5 * 60 * 1000;
 const YT_RESOLVER_PROVIDER_COOLDOWN_MS = 60 * 1000;
-const YT_RESOLVER_NETWORK_COOLDOWN_MS = 15 * 1000;
+const YT_RESOLVER_NETWORK_COOLDOWN_MS = 5 * 1000;
 const ytResolverProviderCooldowns = new Map<string, number>();
+const ytResolverRequestCache = new Map<string, Promise<string>>();
 let ytdlResolverCooldownUntil = 0;
 let ytdlResolverInFlight = false;
 
@@ -2049,35 +2050,64 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
       return format.url as string;
     };
 
-    const resolverTasks: Promise<string>[] = [];
-    if (!ytdlResolverInFlight && Date.now() >= ytdlResolverCooldownUntil) {
-      resolverTasks.push(resolveWithYtdl().catch((error: unknown) => {
-        const status = statusFromError(error);
-        if (status === 429) {
-          ytdlResolverCooldownUntil = Date.now() + YT_RESOLVER_PROVIDER_COOLDOWN_MS;
+    const tryResolversInOrder = async (): Promise<string> => {
+      const orderedResolvers: Array<() => Promise<string>> = [];
+      if (!ytdlResolverInFlight && Date.now() >= ytdlResolverCooldownUntil) {
+        orderedResolvers.push(() => resolveWithYtdl().catch((error: unknown) => {
+          const status = statusFromError(error);
+          if (status === 429) {
+            ytdlResolverCooldownUntil = Date.now() + YT_RESOLVER_PROVIDER_COOLDOWN_MS;
+          }
+          console.warn('YouTube audio resolver failed', { provider: 'ytdl-core', error: resolverErrorMessage(error) });
+          throw error;
+        }));
+      }
+      for (const instance of instances) {
+        if ((ytResolverProviderCooldowns.get(instance) || 0) > Date.now()) continue;
+        orderedResolvers.push(() => resolveWithInstance(instance).catch((error: unknown) => {
+          const status = statusFromError(error);
+          const cooldown = status === 403 || status === 429
+            ? YT_RESOLVER_PROVIDER_COOLDOWN_MS
+            : YT_RESOLVER_NETWORK_COOLDOWN_MS;
+          if (status === 403 || status === 429) {
+            ytResolverProviderCooldowns.set(instance, Date.now() + cooldown);
+          }
+          console.warn('YouTube audio resolver failed', {
+            provider: instance,
+            error: resolverErrorMessage(error),
+            cooldownSeconds: cooldown / 1000,
+          });
+          throw error;
+        }));
+      }
+
+      let lastError: unknown;
+      for (const resolver of orderedResolvers) {
+        try {
+          return await resolver();
+        } catch (error) {
+          lastError = error;
         }
-        console.warn('YouTube audio resolver failed', { provider: 'ytdl-core', error: resolverErrorMessage(error) });
-        throw error;
-      }));
-    }
-    for (const instance of instances) {
-      if ((ytResolverProviderCooldowns.get(instance) || 0) > Date.now()) continue;
-      resolverTasks.push(resolveWithInstance(instance).catch((error: unknown) => {
-        const status = statusFromError(error);
-        const cooldown = status === 403 || status === 429
-          ? YT_RESOLVER_PROVIDER_COOLDOWN_MS
-          : YT_RESOLVER_NETWORK_COOLDOWN_MS;
-        ytResolverProviderCooldowns.set(instance, Date.now() + cooldown);
-        console.warn('YouTube audio resolver failed', {
-          provider: instance,
-          error: resolverErrorMessage(error),
-          cooldownSeconds: cooldown / 1000,
-        });
-        throw error;
-      }));
+      }
+
+      throw lastError ?? new Error('No available YouTube audio resolvers');
+    };
+
+    const existingRequest = ytResolverRequestCache.get(videoId);
+    if (existingRequest) {
+      const audioUrl = await existingRequest;
+      responseCache.set(cacheKey, { data: audioUrl, timestamp: Date.now() });
+      return res.redirect(audioUrl);
     }
 
-    if (resolverTasks.length === 0) {
+    const request = tryResolversInOrder();
+    ytResolverRequestCache.set(videoId, request);
+
+    try {
+      const audioUrl = await request;
+      responseCache.set(cacheKey, { data: audioUrl, timestamp: Date.now() });
+      return res.redirect(audioUrl);
+    } catch (error) {
       const now = Date.now();
       const coolingDownProviders = [
         ...(ytdlResolverCooldownUntil > now
@@ -2104,33 +2134,9 @@ app.get('/api/music/resolve-yt-audio', async (req, res) => {
         message: 'YouTube audio providers are temporarily unavailable',
         retryAfterSeconds,
       });
+    } finally {
+      ytResolverRequestCache.delete(videoId);
     }
-
-    try {
-      const audioUrl = await Promise.any(resolverTasks);
-      responseCache.set(cacheKey, { data: audioUrl, timestamp: Date.now() });
-      return res.redirect(audioUrl);
-    } catch (error) {
-      const failures = error && typeof error === 'object' && 'errors' in error && Array.isArray(error.errors)
-        ? error.errors.length
-        : resolverTasks.length;
-      console.error('All YouTube audio resolvers failed', { videoId, failures });
-    }
-
-    const now = Date.now();
-    const cooldowns = [
-      ytdlResolverCooldownUntil,
-      ...instances.map((instance) => ytResolverProviderCooldowns.get(instance) || 0),
-    ].filter((cooldownUntil) => cooldownUntil > now);
-    const retryAfterSeconds = cooldowns.length > 0
-      ? Math.max(1, Math.min(...cooldowns.map((cooldownUntil) => Math.ceil((cooldownUntil - now) / 1000))))
-      : Math.ceil(YT_RESOLVER_NETWORK_COOLDOWN_MS / 1000);
-    res.setHeader('Retry-After', String(retryAfterSeconds));
-    return res.status(503).json({
-      success: false,
-      message: 'YouTube audio providers are temporarily unavailable',
-      retryAfterSeconds,
-    });
   } catch (error: unknown) {
     console.error('YouTube audio stream resolution failed:', error);
     return res.status(502).json({ success: false, message: 'Audio stream resolution failed' });
