@@ -316,8 +316,9 @@ export async function getTrendingIndianSongs(language: string = 'all'): Promise<
     const res = await apiFetch(`/api/music/trending?language=${encodeURIComponent(language)}`);
     if (res.ok) {
       const data = await res.json();
-      if (data.success && data.videos && data.videos.length > 0) {
-        return data.videos.map(v => ({
+      const videos = data.tracks || data.videos;
+      if (data.success && Array.isArray(videos) && videos.length > 0) {
+        return videos.map(v => ({
             id: v.videoId || v.id,
             title: v.title,
             artist: v.author || v.artist || 'Unknown',
