@@ -351,32 +351,47 @@ class AudioEngine {
   }
 
   private async playFullSongForPreviewTrack(track: Track, previewUrl: string | undefined, token: number) {
-    // Silence whatever was playing while we look the song up
+    const shouldStartPreviewImmediately = !!previewUrl && this.isPreviewOnly(track, previewUrl);
+
+    // Start whatever audio is already available immediately so the user hears music
+    // without waiting for a YouTube/cached full-song lookup to finish.
     this.pauseAllSources();
-    this.notifyPlaybackState(true); // user intent: they pressed play
+    this.notifyPlaybackState(true);
     this.notifyTimeUpdate(0, track.durationSec || 0);
-
-    if (await this.tryPlayCatalogFallback(track, token)) return;
-    if (token !== this.playToken || !this.isPlaying) return;
-
-    let ids = this.ytMatchCache.get(track.id);
-    if (!ids || ids.length === 0) {
-      ids = await findYouTubeMatches(track);
-      if (token !== this.playToken) return; // user skipped to another track
-      if (ids.length > 0) this.ytMatchCache.set(track.id, ids);
+    if (shouldStartPreviewImmediately && previewUrl) {
+      this.playDirectStream(previewUrl, token);
     }
-    if (token !== this.playToken) return;
-    if (!this.isPlaying) return; // paused during lookup; play() will call playTrack() again (cache is warm)
 
-    if (ids && ids.length > 0) {
-      this.startYouTubeCandidates(ids);
-    } else if (previewUrl) {
-      console.warn('No full-length match found, playing available preview:', track.title);
-      this.playDirectStream(previewUrl);
-    } else {
-      console.warn('No audio stream or YouTube video found for track:', track.title);
-      this.startGenerativeFallback();
-    }
+    void (async () => {
+      try {
+        if (await this.tryPlayCatalogFallback(track, token)) return;
+        if (token !== this.playToken || !this.isPlaying) return;
+
+        let ids = this.ytMatchCache.get(track.id);
+        if (!ids || ids.length === 0) {
+          ids = await findYouTubeMatches(track);
+          if (token !== this.playToken) return;
+          if (ids.length > 0) this.ytMatchCache.set(track.id, ids);
+        }
+        if (token !== this.playToken) return;
+        if (!this.isPlaying) return;
+
+        if (ids && ids.length > 0) {
+          this.startYouTubeCandidates(ids);
+        } else if (previewUrl && !shouldStartPreviewImmediately) {
+          console.warn('No full-length match found, playing available preview:', track.title);
+          this.playDirectStream(previewUrl);
+        } else if (!previewUrl) {
+          console.warn('No audio stream or YouTube video found for track:', track.title);
+          this.startGenerativeFallback();
+        }
+      } catch (error) {
+        console.warn('Could not resolve a better audio source for track:', track.title, error);
+        if (!previewUrl || !shouldStartPreviewImmediately) {
+          this.startGenerativeFallback();
+        }
+      }
+    })();
   }
 
   /** Look up (and cache) the YouTube match for a track before it is needed, e.g. the next one in the queue. */
