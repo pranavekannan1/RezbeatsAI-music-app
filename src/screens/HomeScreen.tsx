@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Track, TabType, UserTasteProfile } from '../types';
 import {
   INDIAN_LANGUAGES,
@@ -69,6 +69,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   });
   const [showSearchHistory, setShowSearchHistory] = useState<boolean>(false);
   const [openMenuTrackId, setOpenMenuTrackId] = useState<string | null>(null);
+  const trackLoadRequest = useRef(0);
 
   const addRecentSearch = (q: string) => {
     if (!q || !q.trim()) return;
@@ -126,9 +127,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       }
     } catch {}
 
+    // Load a broad catalog immediately; location detection can refine it afterward.
+    loadLanguageTracks('all');
+
     // Auto-detect user location for region-based song loading
     detectUserLocation().then((loc) => {
-      loadLanguageTracks(loc.language || 'all');
+      if (loc.language && loc.language !== 'all') loadLanguageTracks(loc.language);
     });
 
     loadRadios();
@@ -146,20 +150,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   };
 
   const loadLanguageTracks = async (langId: string) => {
+    const requestId = ++trackLoadRequest.current;
     setSelectedLanguage(langId);
     setIsLoadingTracks(true);
-    try {
-      const [tracks, albums] = await Promise.all([
-        getTrendingIndianSongs(langId),
-        getLatestMovieAlbums(langId),
-      ]);
-      setActiveTracks(tracks);
-      setLatestMovieAlbums(albums);
-    } catch {
-      // Handled
-    } finally {
-      setIsLoadingTracks(false);
-    }
+
+    getTrendingIndianSongs(langId)
+      .then((tracks) => {
+        if (requestId === trackLoadRequest.current) setActiveTracks(tracks);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (requestId === trackLoadRequest.current) setIsLoadingTracks(false);
+      });
+
+    getLatestMovieAlbums(langId)
+      .then((albums) => {
+        if (requestId === trackLoadRequest.current) setLatestMovieAlbums(albums);
+      })
+      .catch(() => {});
   };
 
   // Handle typing search with instant alphabet suggestions
