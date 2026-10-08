@@ -333,7 +333,7 @@ class AudioEngine {
 
     if (ytId) {
       this.ytCandidates = [ytId];
-      void this.playYouTubeTrackWithCatalogFallback(track, ytId, quality, token);
+      this.playYouTubeTrackDirectly(ytId, quality, token);
     } else if (streamUrl && !this.isPreviewOnly(track, streamUrl) && !streamUrl.includes('resolve-yt-audio')) {
       // 2. Play direct audio stream (e.g. JioSaavn 320kbps or local audio)
       this.playDirectStream(streamUrl);
@@ -413,13 +413,11 @@ class AudioEngine {
     this.playDirectStream(resolverUrl.toString(), this.playToken);
   }
 
-  private async playYouTubeTrackWithCatalogFallback(
-    track: Track,
+  private playYouTubeTrackDirectly(
     videoId: string,
     quality: AudioQuality,
     token: number,
   ) {
-    if (await this.tryPlayCatalogFallback(track, token)) return;
     if (token !== this.playToken || !this.userWantsPlay) return;
 
     const resolverUrl = new URL(apiUrl('/api/music/resolve-yt-audio'));
@@ -579,20 +577,34 @@ class AudioEngine {
   }
 
   private updateMediaSession(track: Track) {
-    if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
+    if (
+      typeof window !== 'undefined' &&
+      'mediaSession' in navigator &&
+      typeof MediaMetadata !== 'undefined'
+    ) {
       try {
+        let artworkUrl: string | undefined;
+        if (track.coverUrl) {
+          try {
+            artworkUrl = new URL(track.coverUrl, window.location.href).toString();
+          } catch {
+            artworkUrl = undefined;
+          }
+        }
         navigator.mediaSession.metadata = new MediaMetadata({
-          title: track.title,
-          artist: track.artist,
+          title: track.title || 'Unknown track',
+          artist: track.artist || 'Unknown artist',
           album: track.album || 'RezBeatsAI Master',
-          artwork: [
-            { src: track.coverUrl, sizes: '96x96', type: 'image/jpeg' },
-            { src: track.coverUrl, sizes: '128x128', type: 'image/jpeg' },
-            { src: track.coverUrl, sizes: '192x192', type: 'image/jpeg' },
-            { src: track.coverUrl, sizes: '256x256', type: 'image/jpeg' },
-            { src: track.coverUrl, sizes: '384x384', type: 'image/jpeg' },
-            { src: track.coverUrl, sizes: '512x512', type: 'image/jpeg' },
-          ],
+          artwork: artworkUrl
+            ? [
+                { src: artworkUrl, sizes: '96x96', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '128x128', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '192x192', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '256x256', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '384x384', type: 'image/jpeg' },
+                { src: artworkUrl, sizes: '512x512', type: 'image/jpeg' },
+              ]
+            : [],
         });
         navigator.mediaSession.playbackState = 'playing';
       } catch (e) {
@@ -603,32 +615,34 @@ class AudioEngine {
 
   public setMediaSessionHandlers(onPlay: () => void, onPause: () => void, onNext: () => void, onPrev: () => void) {
     if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
-      try {
-        navigator.mediaSession.setActionHandler('play', () => {
+      const handlers: Partial<Record<MediaSessionAction, MediaSessionActionHandler>> = {
+        play: () => {
           this.userWantsPlay = true;
           onPlay();
-        });
-        navigator.mediaSession.setActionHandler('pause', () => {
+        },
+        pause: () => {
           this.userWantsPlay = false;
           onPause();
-        });
-        navigator.mediaSession.setActionHandler('nexttrack', onNext);
-        navigator.mediaSession.setActionHandler('previoustrack', onPrev);
-        navigator.mediaSession.setActionHandler('seekto', (details) => {
-          if (details.seekTime !== undefined) {
-            this.seek(details.seekTime);
-          }
-        });
-        navigator.mediaSession.setActionHandler('seekforward', (details) => {
-          const skip = details.seekOffset || 10;
-          this.seek(this.getCurrentTime() + skip);
-        });
-        navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-          const skip = details.seekOffset || 10;
-          this.seek(Math.max(0, this.getCurrentTime() - skip));
-        });
-      } catch (err) {
-        console.warn('Failed to bind media session action handlers:', err);
+        },
+        nexttrack: onNext,
+        previoustrack: onPrev,
+        seekto: (details) => {
+          if (details.seekTime !== undefined) this.seek(details.seekTime);
+        },
+        seekforward: (details) => {
+          this.seek(this.getCurrentTime() + (details.seekOffset || 10));
+        },
+        seekbackward: (details) => {
+          this.seek(Math.max(0, this.getCurrentTime() - (details.seekOffset || 10)));
+        },
+      };
+
+      for (const [action, handler] of Object.entries(handlers) as [MediaSessionAction, MediaSessionActionHandler][]) {
+        try {
+          navigator.mediaSession.setActionHandler(action, handler);
+        } catch (err) {
+          console.warn(`Media Session action is unavailable: ${action}`, err);
+        }
       }
     }
   }
