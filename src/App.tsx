@@ -32,6 +32,15 @@ import { StudioScreen } from './screens/StudioScreen';
 import { LibraryScreen } from './screens/LibraryScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 
+function getYouTubeWatchUrl(track: Track): string | null {
+  const idFromTrack = track.id.match(/^(?:youtube[_-]|yt[_-])?([\w-]{11})$/)?.[1];
+  const idFromUrl = [track.audioUrl, track.sourceUrl, track.previewUrl]
+    .map((url) => url?.match(/(?:v=|youtu\.be\/|embed\/|[?&]id=)([\w-]{11})/)?.[1])
+    .find(Boolean);
+  const videoId = idFromTrack || idFromUrl;
+  return videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] =
     useState<UserAuthProfile>(() => getAuthUser());
@@ -63,6 +72,8 @@ export default function App() {
 
   const [appTheme, setAppThemeState] =
     useState<AppTheme>(getAppTheme());
+
+  const currentTrackYouTubeUrl = getYouTubeWatchUrl(currentTrack);
 
   /*
    * ------------------------------------------------------------
@@ -747,16 +758,27 @@ export default function App() {
             error
           </span>
           <span className="min-w-0 flex-1">{playbackError}</span>
-          <button
-            type="button"
-            className="rounded-lg bg-violet-700 px-3 py-2 font-semibold text-white hover:bg-violet-800"
-            onClick={() => {
-              setPlaybackError(null);
-              audioEngine.playTrack(currentTrack);
-            }}
-          >
-            Retry
-          </button>
+          {currentTrackYouTubeUrl ? (
+            <a
+              href={currentTrackYouTubeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-violet-700 px-3 py-2 font-semibold text-white hover:bg-violet-800"
+            >
+              Open on YouTube
+            </a>
+          ) : (
+            <button
+              type="button"
+              className="rounded-lg bg-violet-700 px-3 py-2 font-semibold text-white hover:bg-violet-800"
+              onClick={() => {
+                setPlaybackError(null);
+                audioEngine.playTrack(currentTrack);
+              }}
+            >
+              Retry
+            </button>
+          )}
           <button
             type="button"
             aria-label="Dismiss playback error"

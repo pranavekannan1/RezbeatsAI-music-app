@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "rezbeatsai-music": {
+      "type": "stdio",
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
